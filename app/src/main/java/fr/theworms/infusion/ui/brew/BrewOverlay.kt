@@ -1,6 +1,16 @@
 package fr.theworms.infusion.ui.brew
 
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.TextAutoSize
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.activity.compose.LocalActivity
 import fr.theworms.infusion.text.text
@@ -62,9 +72,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * Infusion en cours, d'après l'état que la machine envoie toutes les 3 secondes. Ce que la machine
- * demande (eau, couvercle…) et les échecs clignotent comme sur l'accueil ; l'app ne relance jamais
- * d'elle-même : c'est « Relancer » ou « Réessayer » qui le fait.
+ * Infusion en cours. L'app relève l'état de la machine toutes les 3 secondes, mais la machine se tait en
+ * infusant : le décompte est local, depuis l'acceptation, recalé sur le début réel de l'infusion
+ * (sous-état 26) quand il arrive. Ce que la machine demande (eau, couvercle…) et les échecs clignotent comme
+ * sur l'accueil ; l'app ne relance jamais d'elle-même : c'est « Relancer » ou « Réessayer » qui le fait.
  */
 @Composable
 fun BrewOverlay(
@@ -81,19 +92,28 @@ fun BrewOverlay(
     var retrying by remember { mutableStateOf(false) }
     LaunchedEffect(session.finished) { while (!session.finished) { now = System.currentTimeMillis(); delay(500) } }
     // Retour pendant l'infusion : l'app passe en arrière-plan, l'infusion continue (suivie en notification).
+    // Pendant un réessai, Retour ne ferme pas plus que « Fermer » (inactif) : la relance a besoin de sa fenêtre.
     val activity = LocalActivity.current
-    BackHandler { if (session.finished) onClose() else activity?.moveTaskToBack(true) }
+    BackHandler { if (!session.finished) activity?.moveTaskToBack(true) else if (!retrying) onClose() }
 
     val live = if (machine.connected) MachineTexts.alert(machine.status, machine.subStatus) else null
     val error = session.error
     val problem = session.problem
-    // Machine pas prête au départ : on montre ce qu'elle demande ; quand c'est réglé, « Relancer » s'active.
-    val ready = problem == BrewProblem.NOT_READY && live == null
+    val stopped = problem == BrewProblem.STOPPED
+    // Machine pas prête au départ : on montre ce qu'elle demande ; « Relancer » s'active quand elle est relue prête
+    // (liaison tenue, état connu, ni demande ni infusion en cours). L'échec d'une relance (injoignable, pas de
+    // réponse, déjà en infusion) remplace le refus du départ : il est montré, et « Relancer » reste possible.
+    val notReady = problem == BrewProblem.NOT_READY
+    val relaunchFailed = notReady && error != null && error != MachineTexts.brewResult(16)
+    val ready = notReady && !relaunchFailed && machine.connected && machine.status != null &&
+        machine.status != MachineTexts.BREWING && live == null
     val alert: MachineAlert? = when {
         // Liaison perdue pendant l'infusion : la session reste ouverte, la liaison est retentée.
         session.linkDown && !session.finished -> MachineAlert(AlertKind.OFFLINE, text(R.string.overlay_unreachable, machine.name), text(R.string.notif_reconnecting))
         error == null -> if (!session.finished) live else null
-        problem == BrewProblem.NOT_READY -> live
+        notReady -> live ?: if (!machine.connected)
+            MachineAlert(AlertKind.OFFLINE, text(R.string.overlay_unreachable, machine.name), if (relaunchFailed) error else text(R.string.machine_unreachable))
+        else null
         problem == BrewProblem.OFFLINE || problem == BrewProblem.NO_ANSWER -> MachineAlert(AlertKind.OFFLINE, text(R.string.overlay_unreachable, machine.name), error)
         problem == BrewProblem.REFUSED -> MachineAlert(AlertKind.ERROR, text(R.string.overlay_refused), error)
         else -> MachineAlert(AlertKind.ERROR, text(R.string.alert_error_title), error)
@@ -121,62 +141,77 @@ fun BrewOverlay(
         // Les appuis s'arrêtent ici : rien ne passe à l'écran caché dessous.
         Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { } }
             .background(c.deep).windowInsetsPadding(WindowInsets.safeDrawing).padding(24.dp),
-        verticalArrangement = Arrangement.SpaceBetween,
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(stringResource(R.string.overlay_header, machine.name.uppercase()), style = MaterialTheme.typography.labelSmall, color = c.onDeepMuted)
-            Text(session.name, style = MaterialTheme.typography.headlineMedium, color = c.onDeep)
-            Text(specLine(session.temperature, session.waterMl, session.steepSeconds), style = MaterialTheme.typography.bodyMedium, color = c.onDeepMuted)
-        }
-        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Box(Modifier.size(240.dp), contentAlignment = Alignment.Center) {
-                val track = c.onDeep.copy(alpha = 0.12f)
-                val bar = alertColor ?: if (current == BrewPhase.FILLING) c.heat else c.accent
-                Canvas(Modifier.fillMaxSize()) {
-                    val stroke = 12.dp.toPx()
-                    val d = size.minDimension - stroke
-                    val tl = Offset((size.width - d) / 2, (size.height - d) / 2)
-                    drawArc(track, 0f, 360f, false, tl, Size(d, d), style = Stroke(stroke))
-                    drawArc(bar, -90f, 360f * progress, false, tl, Size(d, d), style = Stroke(stroke, cap = StrokeCap.Round))
+        // En haut, ce qui peut défiler (paysage, grande police) ; en bas, les étapes et les boutons, toujours à l'écran :
+        // « Arrêter », « Fermer » ou « Réessayer » ne sont plus écrasés à 0 dp. Quand tout tient, l'anneau reste
+        // centré entre l'en-tête et les étapes, comme avant.
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).heightIn(min = maxHeight), verticalArrangement = Arrangement.SpaceBetween) {
+                Column(Modifier.padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(stringResource(R.string.overlay_header, machine.name.uppercase()), style = MaterialTheme.typography.labelSmall, color = c.onDeepMuted)
+                    Text(session.name, style = MaterialTheme.typography.headlineMedium, color = c.onDeep)
+                    Text(specLine(session.temperature, session.waterMl, session.steepSeconds), style = MaterialTheme.typography.bodyMedium, color = c.onDeepMuted)
                 }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        when {
-                            error == null -> stringResource(current.label)
-                            ready -> stringResource(R.string.overlay_ready_machine, machine.name)
-                            problem == BrewProblem.NOT_READY -> stringResource(R.string.overlay_not_started)
-                            problem == BrewProblem.REFUSED -> stringResource(R.string.overlay_refused_short)
-                            problem == BrewProblem.OFFLINE -> stringResource(R.string.overlay_nothing_sent)
-                            problem == BrewProblem.NO_ANSWER -> stringResource(R.string.overlay_no_answer)
-                            else -> stringResource(R.string.overlay_stopped)
-                        },
-                        style = MaterialTheme.typography.bodyMedium, color = c.onDeepMuted, textAlign = TextAlign.Center,
-                    )
-                    Text(
-                        when {
-                            ready -> "✓"
-                            error != null -> "!"
-                            current == BrewPhase.DONE -> stringResource(R.string.overlay_done)
-                            remaining != null -> MachineLimits.steepLabel(remaining)
-                            else -> "…"
-                        },
-                        style = MaterialTheme.typography.displayMedium, color = c.onDeep,
-                    )
-                    if (current == BrewPhase.DONE && error == null) Text(stringResource(R.string.overlay_enjoy), style = MaterialTheme.typography.bodyMedium, color = c.onDeepMuted)
+                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Box(Modifier.size(240.dp), contentAlignment = Alignment.Center) {
+                        val track = c.onDeep.copy(alpha = 0.12f)
+                        val bar = alertColor ?: if (current == BrewPhase.FILLING) c.heat else c.accent
+                        Canvas(Modifier.fillMaxSize()) {
+                            val stroke = 12.dp.toPx()
+                            val d = size.minDimension - stroke
+                            val tl = Offset((size.width - d) / 2, (size.height - d) / 2)
+                            drawArc(track, 0f, 360f, false, tl, Size(d, d), style = Stroke(stroke))
+                            drawArc(bar, -90f, 360f * progress, false, tl, Size(d, d), style = Stroke(stroke, cap = StrokeCap.Round))
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                when {
+                                    stopped -> stringResource(R.string.overlay_stopped)
+                                    error == null -> stringResource(current.label)
+                                    ready -> stringResource(R.string.overlay_ready_machine, machine.name)
+                                    problem == BrewProblem.NOT_READY -> stringResource(R.string.overlay_not_started)
+                                    problem == BrewProblem.REFUSED -> stringResource(R.string.overlay_refused_short)
+                                    problem == BrewProblem.OFFLINE -> stringResource(R.string.overlay_nothing_sent)
+                                    problem == BrewProblem.NO_ANSWER -> stringResource(R.string.overlay_no_answer)
+                                    else -> stringResource(R.string.overlay_stopped)
+                                },
+                                style = MaterialTheme.typography.bodyMedium, color = c.onDeepMuted, textAlign = TextAlign.Center,
+                                // L'étape (« Infusion », « Prêt »…) est dite au lecteur d'écran quand elle change ; pas le décompte,
+                                // qui parlerait à chaque seconde.
+                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                            )
+                            Text(
+                                when {
+                                    ready -> "✓"
+                                    error != null -> "!"
+                                    stopped -> "—"
+                                    // « Prêt » est déjà écrit au-dessus : pas une seconde fois en grand.
+                                    current == BrewPhase.DONE -> "✓"
+                                    remaining != null -> MachineLimits.steepLabel(remaining)
+                                    else -> "…"
+                                },
+                                style = MaterialTheme.typography.displayMedium, color = c.onDeep,
+                            )
+                            if (current == BrewPhase.DONE && error == null && !stopped) Text(stringResource(R.string.overlay_enjoy), style = MaterialTheme.typography.bodyMedium, color = c.onDeepMuted)
+                        }
+                    }
+                    val message = session.message
+                    when {
+                        alert != null -> MachineAlertPanel(alert)
+                        ready -> Note(stringResource(R.string.overlay_relaunch_hint))
+                        relaunchFailed -> Note(error.asString())
+                        message != null -> Note(message.asString())
+                    }
                 }
-            }
-            val message = session.message
-            when {
-                alert != null -> MachineAlertPanel(alert)
-                ready -> Note(stringResource(R.string.overlay_relaunch_hint))
-                message != null -> Note(message.asString())
+                Spacer(Modifier.height(16.dp))
             }
         }
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 phases.forEach { p ->
-                    val done = p.ordinal < current.ordinal || (current == BrewPhase.DONE && error == null)
-                    val on = p == current && current != BrewPhase.DONE
+                    val done = p.ordinal < current.ordinal || (current == BrewPhase.DONE && error == null && !stopped)
+                    // Arrêtée : plus d'étape en cours.
+                    val on = p == current && current != BrewPhase.DONE && !stopped
                     Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         val color = when {
                             done -> c.accent
@@ -184,7 +219,13 @@ fun BrewOverlay(
                             else -> c.onDeep.copy(alpha = 0.14f)
                         }
                         Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(9.dp)).background(color))
-                        Text(stringResource(p.label), style = MaterialTheme.typography.labelSmall, color = if (on) c.onDeep else c.onDeepMuted)
+                        // Sans espacement entre les lettres et réduit au besoin : « Remplissage » tient sur sa ligne,
+                        // même à 360 dp de large, au lieu d'être coupé en « Remplissa / ge ».
+                        Text(
+                            stringResource(p.label), color = if (on) c.onDeep else c.onDeepMuted, maxLines = 1,
+                            style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.sp),
+                            autoSize = TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = 11.sp, stepSize = 0.5.sp),
+                        )
                     }
                 }
             }
@@ -199,10 +240,14 @@ fun BrewOverlay(
                     !session.finished -> OverlayButton(
                         stringResource(R.string.action_stop), filled = false, modifier = m, enabled = now - session.createdAt > 1_000,
                     ) { scope.launch { onStop() } }
+                    // Arrêtée par l'utilisateur : pas une réussite, « Fermer » n'est pas mis en avant.
+                    stopped -> OverlayButton(stringResource(R.string.action_close), filled = false, modifier = m, onClick = onClose)
                     error == null -> OverlayButton(stringResource(R.string.action_close), filled = true, modifier = m, onClick = onClose)
                     problem == BrewProblem.NOT_READY -> {
                         OverlayButton(stringResource(R.string.action_cancel), filled = false, enabled = !retrying, modifier = m, onClick = onClose)
-                        OverlayButton(stringResource(R.string.action_relaunch), filled = true, enabled = ready && !retrying, modifier = m, onClick = retry)
+                        // Hors liaison ou après un échec, la relance se reconnecte et relit l'état avant tout renvoi.
+                        val canRelaunch = ready || (live == null && (relaunchFailed || !machine.connected))
+                        OverlayButton(stringResource(R.string.action_relaunch), filled = true, enabled = canRelaunch && !retrying, modifier = m, onClick = retry)
                     }
                     problem == BrewProblem.REFUSED && teaId != null && onEdit != null -> {
                         OverlayButton(stringResource(R.string.action_close), filled = false, modifier = m, onClick = onClose)
@@ -220,12 +265,14 @@ fun BrewOverlay(
     }
 }
 
+/** Message sous l'anneau (« Arrêt envoyé à la machine. »…), dit au lecteur d'écran quand il paraît ou change. */
 @Composable
 private fun Note(text: String) {
     val c = Infusion.colors
     Text(
         text, style = MaterialTheme.typography.bodyLarge, color = c.onDeep, textAlign = TextAlign.Center,
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.onDeep.copy(alpha = 0.10f)).padding(12.dp),
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.onDeep.copy(alpha = 0.10f))
+            .semantics { liveRegion = LiveRegionMode.Polite }.padding(12.dp),
     )
 }
 

@@ -1,6 +1,14 @@
 package fr.theworms.infusion.ui.brew
 
 import androidx.compose.ui.res.stringResource
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import fr.theworms.infusion.text.UiText
+import fr.theworms.infusion.text.asString
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -47,7 +55,13 @@ import fr.theworms.infusion.ui.theme.Infusion
 /** Mode manuel : température, eau, durée, puis « Infuser » (envoi branché au lot Bluetooth). */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun ManualBrewScreen(connected: Boolean = false, onBrew: (Int, Int, Int) -> Unit = { _, _, _ -> }, onSaveAsTea: (Int, Int, Int) -> Unit = { _, _, _ -> }) {
+fun ManualBrewScreen(
+    connected: Boolean = false,
+    /** Pourquoi « Infuser » est grisé quand la machine n'est pas connectée (voir ConnectionTexts.whyNoBrew). */
+    whyNoBrew: UiText? = null,
+    onBrew: (Int, Int, Int) -> Unit = { _, _, _ -> },
+    onSaveAsTea: (Int, Int, Int) -> Unit = { _, _, _ -> },
+) {
     val c = Infusion.colors
     var temp by rememberSaveable { mutableIntStateOf(90) }
     var water by rememberSaveable { mutableIntStateOf(250) }
@@ -73,7 +87,7 @@ fun ManualBrewScreen(connected: Boolean = false, onBrew: (Int, Int, Int) -> Unit
                 )
                 RoundButton("+", stringResource(R.string.manual_hotter)) { temp = MachineLimits.temperatures[(tempIndex + 1).coerceAtMost(MachineLimits.temperatures.lastIndex)] }
             }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(Modifier.selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(75 to R.string.chip_white, 80 to R.string.chip_green, 90 to R.string.chip_oolong, 95 to R.string.chip_black, 100 to R.string.chip_herbal).forEach { (t, label) ->
                     Chip(stringResource(label), temp == t, { temp = t })
                 }
@@ -81,14 +95,18 @@ fun ManualBrewScreen(connected: Boolean = false, onBrew: (Int, Int, Int) -> Unit
         }
 
         Column(Modifier.fillMaxWidth().infusionCard().background(c.card).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row { Text(stringResource(R.string.label_water), style = MaterialTheme.typography.labelMedium, color = c.ink, modifier = Modifier.weight(1f)); Text(MachineLimits.waterLabel(water, Infusion.metric), style = MaterialTheme.typography.labelMedium, color = c.accentInk) }
+            val waterTitle = stringResource(R.string.label_water)
+            val waterLabel = MachineLimits.waterLabel(water, Infusion.metric)
+            Row { Text(waterTitle, style = MaterialTheme.typography.labelMedium, color = c.ink, modifier = Modifier.weight(1f)); Text(waterLabel, style = MaterialTheme.typography.labelMedium, color = c.accentInk) }
             Slider(
                 value = water.toFloat(), onValueChange = { water = MachineLimits.roundWater(it.toInt()) },
+                // Lu « Eau, 250 ml » et non en pourcentage de la plage.
+                modifier = Modifier.semantics { contentDescription = waterTitle; stateDescription = waterLabel },
                 valueRange = MachineLimits.WATER_MIN.toFloat()..MachineLimits.WATER_MAX.toFloat(),
                 steps = (MachineLimits.WATER_MAX - MachineLimits.WATER_MIN) / MachineLimits.WATER_STEP - 1,
                 colors = SliderDefaults.colors(thumbColor = c.accent, activeTrackColor = c.accent, inactiveTrackColor = c.line),
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(200 to R.string.chip_cup, 300 to R.string.chip_mug, 350 to R.string.chip_max).forEach { (ml, label) ->
                     Chip(stringResource(label), water == ml, { water = ml }, modifier = Modifier.weight(1f))
                 }
@@ -102,7 +120,7 @@ fun ManualBrewScreen(connected: Boolean = false, onBrew: (Int, Int, Int) -> Unit
                 Text(MachineLimits.steepLabel(steep), style = MaterialTheme.typography.titleLarge, color = c.ink, modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 RoundButton("+", stringResource(R.string.manual_longer)) { steep = MachineLimits.steepDurations[(MachineLimits.steepIndex(steep) + 1).coerceAtMost(MachineLimits.steepDurations.lastIndex)] }
             }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(Modifier.selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(60, 120, 180, 240, 300).forEach { s -> Chip(stringResource(R.string.minutes_short, s / 60), steep == s, { steep = s }) }
             }
         }
@@ -124,16 +142,18 @@ fun ManualBrewScreen(connected: Boolean = false, onBrew: (Int, Int, Int) -> Unit
             Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).border(1.5.dp, c.line, RoundedCornerShape(16.dp)).clickable { onSaveAsTea(temp, water, steep) }.padding(15.dp),
             contentAlignment = Alignment.Center,
         ) { Text(stringResource(R.string.manual_save), style = MaterialTheme.typography.labelLarge, color = c.ink) }
-        if (!connected) Text(stringResource(R.string.machine_unreachable), style = MaterialTheme.typography.bodySmall, color = c.muted, modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        if (!connected) Text(whyNoBrew?.asString() ?: stringResource(R.string.machine_unreachable), style = MaterialTheme.typography.bodySmall, color = c.muted, modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         Spacer(Modifier.height(4.dp))
     }
 }
 
+/** « − » / « + » : lus par ce qu'ils règlent (« Moins chaud », « Plus long »), pas « moins » / « plus ». */
 @Composable
 private fun RoundButton(text: String, description: String, onClick: () -> Unit) {
     val c = Infusion.colors
     Box(
-        Modifier.size(56.dp).clip(CircleShape).background(c.background).clickable(onClickLabel = description, onClick = onClick),
+        Modifier.size(56.dp).clip(CircleShape).background(c.background).clickable(onClickLabel = description, onClick = onClick)
+            .semantics { contentDescription = description; role = Role.Button },
         contentAlignment = Alignment.Center,
     ) { Text(text, style = MaterialTheme.typography.headlineMedium, color = c.ink) }
 }

@@ -6,9 +6,9 @@ import fr.theworms.infusion.domain.MachineLimits
 import java.security.MessageDigest
 
 /**
- * Trames de la Maker One, d'après BRU Connect 1.13.0 :
+ * Trames de la Maker One :
  * `FF`, longueur totale, code, charge, bourrage 00, somme de contrôle.
- * Tout est à confirmer sur la machine : les exemples de MakerOneProtocolTest viennent du code de BRU.
+ * Tout est à confirmer sur la machine, comme les exemples de MakerOneProtocolTest.
  */
 object MakerOneProtocol {
     const val SET_TIME = 8
@@ -25,7 +25,9 @@ object MakerOneProtocol {
     const val PRESET_WRITE = 82
     const val RESULT_PRESET = 83
 
+    /** Bouton « Retour » : envoyé seulement après l'association, pour sortir du menu Bluetooth de la machine. */
     const val BUTTON_BACK = 3
+    /** Bouton « OK » : connu, jamais envoyé par l'app (gardé pour documenter le protocole et ses tests). */
     const val BUTTON_OK = 4
 
     /** Thé hors catalogue BRU. */
@@ -80,7 +82,7 @@ object MakerOneProtocol {
         return frame(PRESET_WRITE, payload, if (teaId != null) 60 else 56)
     }
 
-    /** Demande du préréglage `slot` : la commande existe, mais l'app de BRU ne l'envoie jamais (réponse inconnue). */
+    /** Demande du préréglage `slot`, en lecture seule : réponse à confirmer sur la machine. */
     fun presetRead(slot: Int): ByteArray = frame(PRESET_READ, byteArrayOf(slot.toByte()))
 
     /**
@@ -122,9 +124,7 @@ object MakerOneProtocol {
     fun setup(languageCode: Int, metric: Boolean, presets: Int, time: Int = 0): ByteArray =
         frame(SETUP_WRITE, byteArrayOf(languageCode.toByte(), (if (metric) 1 else 0).toByte(), time.toByte(), presets.coerceIn(0, MachineLimits.PRESETS).toByte()), 8)
 
-    fun setup(language: MachineLanguage, metric: Boolean, presets: Int): ByteArray = setup(language.code, metric, presets)
-
-    /** Lecture des réglages (`FF 04 2A E9`) : définie dans BRU Connect mais jamais appelée ; réponse supposée de même forme que 44. */
+    /** Lecture des réglages (`FF 04 2A E9`) : commande connue, jamais vue en usage ; réponse supposée de même forme que 44. */
     fun setupRead(): ByteArray = frame(SETUP_READ)
 
     /**
@@ -171,8 +171,8 @@ object MakerOneProtocol {
     fun le32(v: Long): ByteArray = byteArrayOf(v.toByte(), (v shr 8).toByte(), (v shr 16).toByte(), (v shr 24).toByte())
 
     /**
-     * Lit une trame, avec la même tolérance que l'app de BRU (et les versions 0.1.4 à 0.1.15, essayées sur
-     * la machine) : `valid` (longueur et somme) est seulement noté, jamais exigé. Un état (69) se lit dès
+     * Lit une trame avec tolérance, comme les versions 0.1.4 à 0.1.15 (essayées sur la machine) : `valid`
+     * (longueur et somme) est seulement noté, jamais exigé. Un état (69) se lit dès
      * 5 octets, un résultat (65, 83) dès 4 ; plus court, la trame reste « inconnue ».
      */
     fun parse(frame: ByteArray): Incoming {
@@ -256,10 +256,10 @@ data class BrewIdentity(val installId8: ByteArray, val name: String, val teaId: 
 }
 
 /**
- * Langues de l'app et de l'écran de la machine (code de la commande 44, étiquette de langue d'Android,
- * nom dans sa propre langue). La machine connaît aussi l'allemand (2) et l'espagnol (3) : pas proposés.
+ * Langues de l'app et de l'écran de la machine : `code` de la commande 44, `tag` (étiquette de langue d'Android),
+ * `label` (nom dans sa propre langue, pour le sélecteur) et `nameRes` (nom traduit, pour l'écrire dans une phrase).
+ * La machine connaît aussi l'allemand (2) et l'espagnol (3) : pas proposés.
  */
-/** `label` : nom dans sa propre langue (sélecteur) ; `nameRes` : nom traduit, pour l'écrire dans une phrase. */
 enum class MachineLanguage(val code: Int, val tag: String, val label: String, @StringRes val nameRes: Int) {
     FR(1, "fr", "Français", R.string.language_name_fr), EN(0, "en", "English", R.string.language_name_en);
 
@@ -270,9 +270,7 @@ enum class MachineLanguage(val code: Int, val tag: String, val label: String, @S
 }
 
 /** Réglages lus sur la machine (commande 42). */
-data class MachineSetup(val languageCode: Int, val metric: Boolean, val time: Int, val presets: Int) {
-    val language get() = MachineLanguage.of(languageCode)
-}
+data class MachineSetup(val languageCode: Int, val metric: Boolean, val time: Int, val presets: Int)
 
 sealed interface Incoming {
     val valid: Boolean

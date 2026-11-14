@@ -1,5 +1,8 @@
 package fr.theworms.infusion.ui.components
 
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.res.stringResource
@@ -163,7 +166,10 @@ fun TeaCard(
     }
 }
 
-/** Petit choix sélectionnable, dans la couleur choisie quand il est actif. */
+/**
+ * Petit choix sélectionnable, dans la couleur choisie quand il est actif. Choix exclusif : le lecteur d'écran dit
+ * « sélectionné » (la couleur seule ne le dit pas) ; le conteneur des pastilles porte `selectableGroup()`.
+ */
 @Composable
 fun Chip(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, dot: Color? = null) {
     val c = Infusion.colors
@@ -172,7 +178,7 @@ fun Chip(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifi
             .clip(RoundedCornerShape(99.dp))
             .background(if (selected) c.accent else c.card)
             .then(if (selected) Modifier else Modifier.border(1.dp, c.line, RoundedCornerShape(99.dp)))
-            .clickable(onClick = onClick)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
@@ -185,19 +191,19 @@ fun Chip(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifi
     }
 }
 
-/** Choix exclusif sur une ligne (thème, affichage). */
+/** Choix exclusif sur une ligne (thème, affichage), lu comme un groupe de boutons radio. */
 @Composable
 fun <T> Segmented(options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
     val c = Infusion.colors
     Row(
-        modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.45f).clip(RoundedCornerShape(14.dp)).background(c.background).padding(4.dp),
+        modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.45f).clip(RoundedCornerShape(14.dp)).background(c.background).selectableGroup().padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         options.forEach { (value, label) ->
             val on = value == selected
             Box(
                 Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(if (on) c.accent else Color.Transparent)
-                    .clickable(enabled = enabled) { onSelect(value) }.padding(vertical = 10.dp),
+                    .selectable(selected = on, enabled = enabled, role = Role.RadioButton) { onSelect(value) }.padding(vertical = 10.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(label, style = MaterialTheme.typography.labelMedium, color = if (on) c.onAccent else c.ink, maxLines = 2)

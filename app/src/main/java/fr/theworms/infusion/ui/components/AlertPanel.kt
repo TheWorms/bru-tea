@@ -65,7 +65,8 @@ fun MachineAlertPanel(alert: MachineAlert, modifier: Modifier = Modifier) {
         Spacer(Modifier.width(12.dp))
         Column {
             Text(alert.title.asString(), style = MaterialTheme.typography.titleMedium, color = OnAlert)
-            Text(alert.detail.asString(), style = MaterialTheme.typography.bodySmall, color = OnAlert.copy(alpha = 0.82f))
+            // Détail opaque : à 82 %, il tombait à 3,9:1 sur le rouge au creux de la pulsation (4,5:1 exigés en 12 sp).
+            Text(alert.detail.asString(), style = MaterialTheme.typography.bodySmall, color = OnAlert)
         }
     }
 }

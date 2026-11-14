@@ -22,7 +22,10 @@ class UpdateInstallReceiver : BroadcastReceiver() {
         val updater = (context.applicationContext as InfusionApp).container.updater
         val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
         val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
-        Log.i("Infusion", "Installation : statut $status ${message.orEmpty()}")
+        val session = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, Updater.NO_SESSION)
+        Log.i("Infusion", "Installation : session $session, statut $status ${message.orEmpty()}")
+        // Ancienne session abandonnée : son « annulée » ne touche pas l'installation en cours.
+        if (!updater.concerns(status, session)) return
         when {
             status == PackageInstaller.STATUS_PENDING_USER_ACTION ->
                 IntentCompat.getParcelableExtra(intent, Intent.EXTRA_INTENT, Intent::class.java)?.let(updater::onConfirmationNeeded)

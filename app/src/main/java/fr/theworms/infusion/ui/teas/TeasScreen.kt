@@ -1,6 +1,9 @@
 package fr.theworms.infusion.ui.teas
 
 import androidx.compose.runtime.remember
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.runtime.saveable.Saver
@@ -110,17 +113,19 @@ fun TeasScreen(container: AppContainer, onEdit: (Long) -> Unit) {
                 Icon(painterResource(R.drawable.ic_search), contentDescription = null, tint = c.muted, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
                 Box(Modifier.weight(1f)) {
-                    if (query.isEmpty()) Text(stringResource(R.string.teas_search), color = c.muted, style = MaterialTheme.typography.bodyLarge)
+                    val searchLabel = stringResource(R.string.teas_search)
+                    if (query.isEmpty()) Text(searchLabel, color = c.muted, style = MaterialTheme.typography.bodyLarge)
                     BasicTextField(
                         value = query, onValueChange = { query = it }, singleLine = true,
                         textStyle = MaterialTheme.typography.bodyLarge.copy(color = c.ink),
-                        cursorBrush = SolidColor(c.accentInk), modifier = Modifier.fillMaxWidth(),
+                        // Nommé pour le lecteur d'écran : l'indication disparaît dès qu'on tape.
+                        cursorBrush = SolidColor(c.accentInk), modifier = Modifier.fillMaxWidth().semantics { contentDescription = searchLabel },
                     )
                 }
             }
         }
         item(span = { GridItemSpan(2) }) {
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.horizontalScroll(rememberScrollState()).selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Chip(stringResource(R.string.teas_all), filter == Filter.All, { filter = Filter.All })
                 Chip(stringResource(R.string.teas_favorites), filter == Filter.Favorites, { filter = Filter.Favorites })
                 Chip(stringResource(R.string.teas_on_machine), filter == Filter.OnMachine, { filter = Filter.OnMachine })

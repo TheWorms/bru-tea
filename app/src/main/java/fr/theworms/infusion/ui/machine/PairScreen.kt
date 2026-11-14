@@ -1,6 +1,8 @@
 package fr.theworms.infusion.ui.machine
 
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.compose.material3.minimumInteractiveComponentSize
 import kotlinx.coroutines.async
 import fr.theworms.infusion.text.asString
 import androidx.compose.ui.res.pluralStringResource
@@ -46,6 +48,8 @@ import fr.theworms.infusion.R
 import fr.theworms.infusion.ble.FoundMachine
 import fr.theworms.infusion.ui.components.infusionCard
 import fr.theworms.infusion.ui.theme.Infusion
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -60,22 +64,34 @@ fun PairScreen(container: AppContainer, permissionTick: Int, onRequestPermission
     var round by remember { mutableIntStateOf(0) }
     var pairing by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    val allowed = remember(permissionTick) { machine.hasPermissions() }
+    // Relue au retour dans l'app (autorisation donnée dans les réglages d'Android) et après chaque demande.
+    var allowed by remember { mutableStateOf(machine.hasPermissions()) }
+    LifecycleResumeEffect(permissionTick) {
+        allowed = machine.hasPermissions()
+        onPauseOrDispose { }
+    }
     // Bluetooth suivi en direct : allumé depuis les réglages rapides, la recherche démarre aussitôt.
     val bluetoothOn by machine.bluetoothOn.collectAsStateWithLifecycle()
 
+    // Recherche en cours, arrêtée au toucher d'une machine : comme l'app d'origine, on ne se connecte pas pendant
+    // un balayage intensif (connexion, MTU et appairage s'y font mal sur certaines puces).
+    var scanJob by remember { mutableStateOf<Job?>(null) }
     LaunchedEffect(round, allowed, bluetoothOn) {
         if (!allowed || !bluetoothOn) return@LaunchedEffect
+        scanJob = coroutineContext[Job]
         scanning = true
-        withTimeoutOrNull(12_000) {
-            machine.scan().collect { m -> if (found.none { it.address == m.address }) found += m }
+        try {
+            withTimeoutOrNull(12_000) {
+                machine.scan().collect { m -> if (found.none { it.address == m.address }) found += m }
+            }
+        } finally {
+            scanning = false
         }
-        scanning = false
     }
 
     Column(Modifier.fillMaxSize().background(c.background)) {
         Row(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.statusBars).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).clickable(onClickLabel = stringResource(R.string.action_back), onClick = onDone), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).clickable(onClickLabel = stringResource(R.string.action_back), onClick = onDone), contentAlignment = Alignment.Center) {
                 Icon(painterResource(R.drawable.ic_back), contentDescription = stringResource(R.string.action_back), tint = c.ink)
             }
             Text(stringResource(R.string.pair_title), style = MaterialTheme.typography.titleLarge, color = c.ink)
@@ -92,7 +108,11 @@ fun PairScreen(container: AppContainer, permissionTick: Int, onRequestPermission
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(if (scanning) stringResource(R.string.pair_searching) else pluralStringResource(R.plurals.pair_found, found.size, found.size), style = MaterialTheme.typography.titleMedium, color = c.ink, modifier = Modifier.weight(1f))
                         if (scanning) CircularProgressIndicator(Modifier.size(20.dp), color = c.accent, strokeWidth = 2.dp)
-                        else Text(stringResource(R.string.pair_search_again), style = MaterialTheme.typography.labelLarge, color = c.accentInk, modifier = Modifier.clickable { found.clear(); round++ }.padding(6.dp))
+                        else Text(
+                            stringResource(R.string.pair_search_again), style = MaterialTheme.typography.labelLarge, color = c.accentInk,
+                            // 48 dp de haut réservés au doigt, le texte reste à sa taille.
+                            modifier = Modifier.minimumInteractiveComponentSize().clip(RoundedCornerShape(8.dp)).clickable(enabled = pairing == null) { found.clear(); round++ }.padding(6.dp),
+                        )
                     }
                     found.sortedByDescending { it.rssi }.forEach { m ->
                         Row(
@@ -102,6 +122,8 @@ fun PairScreen(container: AppContainer, permissionTick: Int, onRequestPermission
                                     // Dans le scope de l'app : quitter l'écran pendant l'association ne laisse pas
                                     // une liaison à moitié ouverte (connectTo se termine proprement).
                                     scope.launch {
+                                        // Balayage arrêté (stopScan fait) avant la connexion.
+                                        scanJob?.cancelAndJoin()
                                         val ok = container.appScope.async { machine.pair(m) }.await()
                                         pairing = null
                                         if (ok) onDone()

@@ -36,14 +36,10 @@ data class AppSettings(
     /** Nom Bluetooth donné par la machine (générique), utilisé tant qu'aucun nom n'est choisi. */
     val machineBleName: String = "",
     val machineFirmware: String = "",
-    /** Langue de l'écran de la machine et unités, envoyées avec le nombre de préréglages. */
-    val machineLanguage: String = "FR",
+    /** Unités, reprises de la machine à la connexion. Sa langue n'est pas gardée ici : celle de l'app décide (AppLanguage). */
     val metric: Boolean = true,
     /** Dernier thé infusé, pour « Refaire ». */
     val lastTeaId: Long = 0,
-    val lastBrewAt: Long = 0,
-    /** Identifiant stable de cette installation (forme longue de la commande d'infusion). */
-    val installId: String = "",
     /** Bip et vibration quand la machine demande quelque chose ou qu'une infusion échoue (activés par défaut). */
     val alertSound: Boolean = true,
     val alertVibration: Boolean = true,
@@ -61,10 +57,9 @@ class SettingsStore(private val context: Context) {
         val machineName = stringPreferencesKey("machine_surnom")
         val machineBleName = stringPreferencesKey("machine_nom_bluetooth")
         val machineFirmware = stringPreferencesKey("machine_firmware")
-        val machineLanguage = stringPreferencesKey("machine_langue")
         val metric = booleanPreferencesKey("machine_metrique")
         val lastTeaId = longPreferencesKey("dernier_the")
-        val lastBrewAt = longPreferencesKey("derniere_infusion")
+        /** Identifiant stable de cette installation (forme longue de la commande d'infusion), lu par [installId]. */
         val installId = stringPreferencesKey("installation")
         val alertSound = booleanPreferencesKey("alerte_bip")
         val alertVibration = booleanPreferencesKey("alerte_vibration")
@@ -91,11 +86,8 @@ class SettingsStore(private val context: Context) {
         machineName = this[Keys.machineName].orEmpty(),
         machineBleName = this[Keys.machineBleName].orEmpty(),
         machineFirmware = this[Keys.machineFirmware].orEmpty(),
-        machineLanguage = this[Keys.machineLanguage] ?: "FR",
         metric = this[Keys.metric] ?: true,
         lastTeaId = this[Keys.lastTeaId] ?: 0,
-        lastBrewAt = this[Keys.lastBrewAt] ?: 0,
-        installId = this[Keys.installId].orEmpty(),
         alertSound = this[Keys.alertSound] ?: true,
         alertVibration = this[Keys.alertVibration] ?: true,
     )
@@ -111,11 +103,10 @@ class SettingsStore(private val context: Context) {
     suspend fun setMachineBleName(name: String) = context.dataStore.edit { it[Keys.machineBleName] = name }
     suspend fun setMachineName(name: String) = context.dataStore.edit { it[Keys.machineName] = name }
     suspend fun setMachineFirmware(value: String) = context.dataStore.edit { it[Keys.machineFirmware] = value }
-    suspend fun setMachineLanguage(code: String) = context.dataStore.edit { it[Keys.machineLanguage] = code }
     suspend fun setMetric(value: Boolean) = context.dataStore.edit { it[Keys.metric] = value }
     suspend fun setAlertSound(value: Boolean) = context.dataStore.edit { it[Keys.alertSound] = value }
     suspend fun setAlertVibration(value: Boolean) = context.dataStore.edit { it[Keys.alertVibration] = value }
-    suspend fun setLastBrew(teaId: Long) = context.dataStore.edit { it[Keys.lastTeaId] = teaId; it[Keys.lastBrewAt] = System.currentTimeMillis() }
+    suspend fun setLastBrew(teaId: Long) = context.dataStore.edit { it[Keys.lastTeaId] = teaId }
 
     /** Identifiant d'installation, créé au premier besoin puis gardé. */
     suspend fun installId(): String {

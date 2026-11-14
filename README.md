@@ -8,9 +8,12 @@ appartiennent à leurs propriétaires.
 
 ## Télécharger
 
+Android 13 ou plus récent, avec Bluetooth LE.
+
 **[Dernière version](https://github.com/TheWorms/bru-tea/releases/latest)** : installe le fichier
-`Infusion.<version>.apk` ; l'app se met ensuite à jour seule. Android demande une fois d'autoriser
-l'installation d'applis depuis cette source.
+`Infusion.<version>.apk` (Android demande d'autoriser l'installation d'applis depuis le navigateur).
+Ensuite, l'app propose ses mises à jour : la première demande d'autoriser Infusion à installer des
+applis, puis une confirmation d'Android ; les suivantes s'installent sans confirmation.
 
 ## Ce qu'elle fait
 

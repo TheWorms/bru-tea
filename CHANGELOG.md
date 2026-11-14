@@ -1,5 +1,47 @@
 # Journal des versions
 
+## 0.1.21
+Relecture complète (Bluetooth, écrans, données, propreté).
+- Infusion : « Arrêter » ou la fermeture de la fenêtre pendant la connexion clôt la session sans rien envoyer, et une
+  réponse tardive de la machine ne la rouvre plus ; un arrêt est affiché comme tel (« Infusion arrêtée », sans son) et
+  plus comme un thé prêt ; une infusion lancée juste après la précédente ne se clôt plus en « Prêt » dès la première
+  trame ; pendant « Réessayer », Retour est inactif et la réponse ne touche que cette infusion.
+- Notification : le décompte ne passe plus en négatif quand la machine se tait après la fin prévue ; la notification de
+  fin de l'infusion précédente est retirée au début d'une nouvelle.
+- Liaison : la machine muette après « Arrêter » n'est plus coupée au bout de 3 s ; perte d'appairage reconnue aussi
+  sur un échec de sécurité ou une coupure pendant l'abonnement, y compris quand « Infuser » lance la connexion ; après
+  un premier appairage raté, la pastille et « Se connecter » refonctionnent ; associer une autre machine arrête la
+  relève de l'ancienne ; recherche Bluetooth arrêtée pendant l'association ; les trois « Retour » qui sortent la
+  machine de son menu Bluetooth décidés sur son état relu ; lecture des réglages de la machine plus relancée sans geste
+  à chaque reconnexion ; « prête » affiché seulement liaison tenue, échecs de « Relancer » affichés.
+- Accueil et pastille : la vraie cause (Bluetooth coupé, appairage perdu, pas de machine, connexion en cours) au lieu
+  de « Hors de portée », avec quoi faire ; un appui raté sur la pastille se voit aussi hors de l'onglet Machine.
+- Onglet Machine : synchronisation et lectures une seule à la fois, suivies même hors de l'écran ; résultat affiché
+  près du bouton touché et annoncé ; lecture des préréglages : les thés importés sont comptés ; nombre de préréglages
+  écrit retenu (plus de 10 préréglages réaffichés après un changement de langue ou d'unités) ; l'heure est dite réglée
+  à la première connexion après le lancement de l'app et à chaque connexion demandée (ou avec « Régler »), plus « à
+  chaque connexion ».
+- Fiche d'un thé : « Enregistrer » attend une photo encore en chemin (galerie ou base) et garde une synchronisation
+  finie entre-temps ; une rotation pendant le chargement de la photo ou l'enregistrement ne perd plus la photo et ne
+  crée plus le thé deux fois ; erreurs affichées près du champ en cause et annoncées ; crédit de la photo de la base
+  affiché ; « Enregistrer comme thé » montre toujours les réglages venus du mode manuel.
+- Base de thés : « Récupérer » préfère le nom exact et ne devine plus sur un début de nom de plusieurs mots (« Thé vert »
+  ne remplit plus « Thé vert glacé ») ni une fiche inadaptée à la machine ; recherche avec œ, æ, ß ; thés ajoutés à la
+  machine rangés après ceux qui ont déjà une position ; un refus d'accès ne dit plus « le dépôt doit être public ».
+- Autorisation Bluetooth : un double appui n'ouvre plus les réglages d'Android par-dessus la demande ; une autorisation
+  donnée dans les réglages d'Android est vue au retour.
+- Lecteur d'écran : boutons ronds, curseurs (« Eau, 250 ml »), champs, interrupteurs et couleurs nommés ; pastilles,
+  choix segmentés, couleurs et onglets du bas disent lequel est sélectionné ; fin d'infusion annoncée.
+- Affichage : en paysage ou en grande police, l'accueil et la fenêtre d'infusion défilent (boutons jamais écrasés) ;
+  « Remplissage » sur une ligne ; « Prêt » plus en double ; contraste des réglages du bouton Infuser et des alertes
+  rouges ; cibles de 48 dp partout ; clignotement d'alerte seulement pendant une alerte, sans recomposer chaque image.
+- Mises à jour : seul le retour de l'installation en cours compte (plus de « annulée » venu d'une précédente) ;
+  « Installation après l'infusion » affiché.
+- Anglais : « tea database » partout, tournures revues, dates à l'anglaise (« 4 Nov at 13:31 »).
+- Propreté : code mort, réglages jamais relus et commentaires faux retirés ; docs/base-thes.md à jour (eau de 100 à
+  350 ml, usage de l'identifiant, crédit des photos).
+- README : Android 13 ou plus récent demandé.
+
 ## 0.1.20
 - Mises à jour : depuis les Releases GitHub (TheWorms/bru-tea) ; theworms.fr n'est plus utilisé. Les versions jusqu'à
   la 0.1.19 ne regardent que theworms.fr : installer la 0.1.20 une fois à la main.
@@ -16,7 +58,7 @@
   ramenés à 100 ml ; un thé déjà enregistré sous 100 ml part à 100 ml.
 
 ## 0.1.17
-- Trames de la machine lues avec la même tolérance que l'app de BRU et que les versions 0.1.4 à 0.1.15 : longueur et
+- Trames de la machine lues avec tolérance, comme les versions 0.1.4 à 0.1.15 : état dès 5 octets, longueur et
   somme de contrôle seulement notées (la 0.1.16 les exigeait, sans preuve que la machine les respecte) ; une
   notification n'est découpée que si toutes ses longueurs sont plausibles ; chaque trame reçue est journalisée.
 - Suivi d'infusion : l'écran « bonne dégustation » d'une infusion précédente ne clôt plus la nouvelle ; une erreur de la
@@ -177,7 +219,7 @@ Scan de stabilité et de propreté (trois relectures indépendantes et lint Andr
 - Plus rien n'est écrit sur la machine sans « Synchroniser » : la 0.1.0 renvoyait les thés tout seuls après une
   modification, ce qui remplaçait des préréglages de la machine sans prévenir.
 - « Synchroniser » demande confirmation et dit ce qui sera remplacé (préréglages 1 à N, nombre affiché, langue et unités).
-- Essai : « Lire les préréglages de la machine » (lecture seule, commande jamais utilisée par l'app de BRU) ;
+- Essai : « Lire les préréglages de la machine » (lecture seule, réponse à confirmer sur la machine) ;
   importe ceux qui se comprennent, sinon montre la réponse brute à copier.
 - Nom de la machine relu à chaque connexion (nom Bluetooth donné par la machine, comme l'app de BRU).
 - Journal Bluetooth retiré de l'écran (il reste dans la console Android : adb logcat -s Infusion).

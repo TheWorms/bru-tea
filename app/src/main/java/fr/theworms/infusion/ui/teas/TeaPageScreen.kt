@@ -1,6 +1,12 @@
 package fr.theworms.infusion.ui.teas
 
 import androidx.compose.runtime.remember
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import fr.theworms.infusion.text.UiText
+import fr.theworms.infusion.text.asString
 import fr.theworms.infusion.text.displayedLanguage
 import androidx.compose.ui.res.stringResource
 import android.widget.Toast
@@ -66,6 +72,8 @@ fun TeaPageScreen(
     container: AppContainer,
     teaId: Long,
     connected: Boolean,
+    /** Pourquoi « Infuser » est grisé quand la machine n'est pas connectée (voir ConnectionTexts.whyNoBrew). */
+    whyNoBrew: UiText? = null,
     onBack: () -> Unit,
     onEdit: () -> Unit,
     onBrew: (Tea) -> Unit,
@@ -167,11 +175,12 @@ fun TeaPageScreen(
                     Spacer(Modifier.width(10.dp))
                     Text(stringResource(R.string.action_brew), style = MaterialTheme.typography.titleMedium, color = c.onAccent)
                     Spacer(Modifier.width(10.dp))
-                    Text(specLine(t.temperature, t.waterMl, t.steepSeconds), style = MaterialTheme.typography.bodySmall, color = c.onAccent.copy(alpha = 0.75f))
+                    // Opaque : à 75 %, ces 12 sp tombaient sous 4,5:1 sur chacune des six couleurs.
+                    Text(specLine(t.temperature, t.waterMl, t.steepSeconds), style = MaterialTheme.typography.bodySmall, color = c.onAccent)
                 }
                 if (!connected) {
                     Text(
-                        stringResource(R.string.machine_unreachable), style = MaterialTheme.typography.bodySmall, color = c.muted,
+                        whyNoBrew?.asString() ?: stringResource(R.string.machine_unreachable), style = MaterialTheme.typography.bodySmall, color = c.muted,
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp), textAlign = TextAlign.Center,
                     )
                 }
@@ -194,7 +203,8 @@ fun TeaPageScreen(
                 ) { Icon(painterResource(R.drawable.ic_sync), contentDescription = null, tint = fg, modifier = Modifier.size(20.dp)) }
             }
             GlassButton(stringResource(if (t.favorite) R.string.fav_remove else R.string.fav_add), onClick = {
-                scope.launch { container.database.teas().update(t.copy(favorite = !t.favorite)) }
+                // Seul le favori change : le reste de la ligne (position, synchronisation) n'est pas réécrit.
+                scope.launch { container.database.teas().setFavorite(t.id, !t.favorite) }
             }) {
                 Text(if (t.favorite) "★" else "☆", color = if (t.favorite) c.accent else Color.White, style = MaterialTheme.typography.titleLarge)
             }
@@ -214,10 +224,12 @@ private fun originLabel(origin: String): String? =
 
 private val PARENTHESES = Regex("\\s*\\((.+)\\)\\s*$")
 
+/** Bouton rond en verre fumé ; le lecteur d'écran dit son action (« Retour », « Modifier ce thé »), pas « étoile noire ». */
 @Composable
 private fun GlassButton(description: String, background: Color = GLASS, onClick: () -> Unit, content: @Composable () -> Unit) {
     Box(
-        Modifier.size(44.dp).clip(CircleShape).background(background).clickable(onClickLabel = description, onClick = onClick),
+        Modifier.size(44.dp).clip(CircleShape).background(background).clickable(onClickLabel = description, onClick = onClick)
+            .semantics { contentDescription = description; role = Role.Button },
         contentAlignment = Alignment.Center,
     ) { content() }
 }

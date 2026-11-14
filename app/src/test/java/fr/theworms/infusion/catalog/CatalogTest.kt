@@ -1,7 +1,9 @@
 package fr.theworms.infusion.catalog
 
+import fr.theworms.infusion.R
 import fr.theworms.infusion.ble.MachineLanguage
 import fr.theworms.infusion.domain.TeaType
+import fr.theworms.infusion.text.text
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -42,6 +44,7 @@ class CatalogTest {
         assertEquals("Inde (Assam)", assam.origin)
         assertEquals(95, assam.temperature); assertEquals(250, assam.waterMl); assertEquals(240, assam.steepSeconds)
         assertEquals("assets/photos/catalogue/black-assam.webp", assam.photo)
+        assertEquals("Théothèque (IA)", assam.photoCredit)
         assertFalse(assam.adjusted)
         assertNull(assam.unsuitable)
         val gokou = p.entries.first { it.id == "green-gokou-sencha" }
@@ -50,6 +53,7 @@ class CatalogTest {
         assertEquals(70, gokou.steepSeconds)  // 75 → 70 (durées de la machine ; à égalité, la plus courte)
         assertTrue(gokou.adjusted)
         assertNull(gokou.photo)
+        assertEquals("", gokou.photoCredit)
         assertNull(p.entries.first { it.id == "evasion" }.photo)
     }
 
@@ -76,6 +80,62 @@ class CatalogTest {
         assertEquals("herbal-verveine", Catalog.lookup(e, "verveine du soir")?.id)
         assertNull(Catalog.lookup(e, "Thé de mamie"))
         assertNull(Catalog.lookup(e, "th"))
+    }
+
+    @Test fun `le nom exact passe avant les noms qui le contiennent`() {
+        // Cas relevés dans tea-db : le nom le plus long gagnait, même quand c'était lui qui contenait le texte tapé.
+        val e = Catalog.parse("""
+            [
+              {"id": "black-darjeeling-first-flush", "nom": "Darjeeling First Flush", "famille": "black", "eau_ml": 250,
+               "temperature_c": 85, "duree_s": 180, "alias": ["Darjeeling de printemps (méthode Palais)"]},
+              {"id": "black-darjeeling", "nom": "Darjeeling", "famille": "black", "eau_ml": 250, "temperature_c": 90, "duree_s": 180},
+              {"id": "herbal-rooibos-citron-gingembre", "nom": "Rooibos citron gingembre", "famille": "herbal", "eau_ml": 250,
+               "temperature_c": 100, "duree_s": 300},
+              {"id": "herbal-rooibos", "nom": "Rooibos", "famille": "herbal", "eau_ml": 250, "temperature_c": 100, "duree_s": 300},
+              {"id": "black-the-noir-a-la-cannelle", "nom": "Thé noir à la cannelle", "famille": "black", "eau_ml": 250,
+               "temperature_c": 95, "duree_s": 240},
+              {"id": "herbal-cannelle", "nom": "Cannelle", "famille": "herbal", "eau_ml": 250, "temperature_c": 100, "duree_s": 600},
+              {"id": "cold-the-noir-glace", "nom": "Thé noir glacé", "famille": "cold", "eau_ml": 350, "temperature_c": null, "duree_s": 7200},
+              {"id": "cold-the-vert-glace", "nom": "Thé vert glacé", "famille": "cold", "eau_ml": 350, "temperature_c": null, "duree_s": 3600},
+              {"id": "green-the-vert-a-la-peche", "nom": "Thé vert à la pêche", "famille": "green", "eau_ml": 250,
+               "temperature_c": 80, "duree_s": 180},
+              {"id": "herbal-menthe-verte", "nom": "Menthe verte", "famille": "herbal", "eau_ml": 250, "temperature_c": 100, "duree_s": 300},
+              {"id": "black-french-earl-grey", "nom": "French Earl Grey", "famille": "black", "eau_ml": 250, "temperature_c": 95, "duree_s": 240},
+              {"id": "black-earl-grey", "nom": "Earl Grey", "famille": "black", "eau_ml": 250, "temperature_c": 95, "duree_s": 240},
+              {"id": "green-gokou-sencha", "nom": "Gokou Sencha", "famille": "green", "eau_ml": 100, "temperature_c": 80, "duree_s": 70}
+            ]
+        """.trimIndent()).entries
+        assertEquals("black-darjeeling", Catalog.lookup(e, "Darjeeling")?.id)
+        assertEquals("black-darjeeling", Catalog.lookup(e, "Darjeeling d'été")?.id)
+        assertEquals("black-darjeeling-first-flush", Catalog.lookup(e, "Darjeeling First Flush du jardin")?.id)
+        assertEquals("herbal-rooibos", Catalog.lookup(e, "Rooibos")?.id)
+        assertEquals("herbal-cannelle", Catalog.lookup(e, "Cannelle")?.id)
+        // Un mot seul trop court ne choisit pas au hasard parmi tous les noms qui le contiennent.
+        assertNull(Catalog.lookup(e, "Thé"))
+        // Début de nom : le plus court gagne ; jamais un milieu de mot (« the vert » dans « menthe verte »).
+        assertEquals("black-earl-grey", Catalog.lookup(e, "Earl")?.id)
+        assertEquals("green-gokou-sencha", Catalog.lookup(e, "Gokou")?.id)
+        // Début de nom de plusieurs mots : rien, ni l'infusion à froid (clé la plus courte, comme dans tea-db), ni une autre.
+        assertNull(Catalog.lookup(e, "Thé vert"))
+        assertNull(Catalog.lookup(e, "Thé noir"))
+        // Un seul mot : jamais une fiche inadaptée devinée (« Glacé » ne remplit pas une infusion à froid).
+        assertNull(Catalog.lookup(e, "Glacé"))
+        // Nom exact ou contenu dans le texte : la fiche inadaptée reste trouvée (l'avertissement s'affiche).
+        assertEquals("cold-the-vert-glace", Catalog.lookup(e, "Thé vert glacé")?.id)
+        assertEquals("cold-the-noir-glace", Catalog.lookup(e, "Thé noir glacé maison")?.id)
+        assertEquals("green-the-vert-a-la-peche", Catalog.lookup(e, "Thé vert à la pêche")?.id)
+    }
+
+    @Test fun `dans le vrai fichier de tea-db, chaque nom retrouve une fiche de ce nom`() {
+        // Copie de docs/thes.json de tea-db (~/work/tea-db-ref) ; ignoré si le fichier n'est pas là.
+        val f = java.io.File(System.getProperty("user.home"), "work/tea-db-ref/docs/thes.json")
+        if (!f.exists()) return
+        val entries = Catalog.parse(f.readText()).entries
+        val wrong = entries.filter { e ->
+            val key = fr.theworms.infusion.domain.normalizeForSearch(e.name)
+            key.length >= 3 && Catalog.lookup(entries, e.name)?.searchKeys?.contains(key) != true
+        }
+        assertTrue(wrong.joinToString { it.name }, wrong.isEmpty())
     }
 
     @Test fun `familles vers types`() {
@@ -164,6 +224,14 @@ class CatalogTest {
         // Note d'un thé repris de la machine, dans les deux langues : remplacée par la fiche.
         assertEquals(Catalog.notesFor(assam, MachineLanguage.EN), Catalog.mergeNotes("From machine preset 3.", assam, language = MachineLanguage.EN))
         assertEquals(Catalog.notesFor(assam), Catalog.mergeNotes("Repris du préréglage 3 de la machine.", assam))
+    }
+
+    @Test fun `un 401 ou un 403 de GitHub n'est qu'un code, sans parler de dépôt privé`() {
+        // La base est un dépôt public fixe : ce refus vient d'un proxy, d'un portail Wi-Fi ou d'un blocage.
+        assertEquals(text(R.string.catalog_http, 403), Catalog.httpError(403, "thes.json"))
+        assertEquals(text(R.string.catalog_http, 401), Catalog.httpError(401, "thes.json"))
+        assertEquals(text(R.string.catalog_http, 500), Catalog.httpError(500, "thes.json"))
+        assertEquals(text(R.string.catalog_not_found, "thes.json"), Catalog.httpError(404, "thes.json"))
     }
 
     @Test fun `nouvelles fiches annoncées, sauf au premier chargement`() {

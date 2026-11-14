@@ -29,8 +29,8 @@ android {
         minSdk = 33
         targetSdk = 35
         // Bump CONJOINT : versionName ET versionCode.
-        versionCode = 21
-        versionName = "0.1.20"
+        versionCode = 22
+        versionName = "0.1.21"
     }
 
     signingConfigs {
@@ -82,6 +82,8 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
+    // Fiche d'un thé : photos et enregistrement en cours tenus par l'entrée de navigation (TeaEditWork).
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)

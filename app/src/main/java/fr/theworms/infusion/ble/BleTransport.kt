@@ -163,7 +163,7 @@ class BleTransport(private val context: Context) {
         log("connexion à $address")
         firmware = null
         deviceName = null
-        // Rien n'est gardé de la liaison précédente : MTU de base, numéros d'opération remis à zéro.
+        // Rien n'est gardé de la liaison précédente : MTU de base, aucune opération en attente.
         mtu = DEFAULT_MTU
         pendingOp = null
         val setup = CompletableDeferred<Boolean>().also { pendingSetup = it }
@@ -247,7 +247,10 @@ class BleTransport(private val context: Context) {
 
     private fun toResult(status: Int?): WriteResult = when (status) {
         BluetoothGatt.GATT_SUCCESS -> WriteResult.OK
-        BluetoothGatt.GATT_INSUFFICIENT_AUTHENTICATION, GATT_INSUFFICIENT_AUTHORIZATION, BluetoothGatt.GATT_INSUFFICIENT_ENCRYPTION -> WriteResult.PairingNeeded
+        // 137 : Android a lui-même retenté l'abonnement avec authentification, et l'appairage a échoué (refusé,
+        // annulé, clé perdue par la machine) ; il rend ce statut à la place de 5 ou 15.
+        BluetoothGatt.GATT_INSUFFICIENT_AUTHENTICATION, GATT_INSUFFICIENT_AUTHORIZATION, BluetoothGatt.GATT_INSUFFICIENT_ENCRYPTION,
+        GATT_AUTH_FAIL -> WriteResult.PairingNeeded
         else -> WriteResult.Failed
     }
 
@@ -257,7 +260,9 @@ class BleTransport(private val context: Context) {
                 if (runCatching { g.discoverServices() }.getOrDefault(false) != true) pendingSetup?.complete(false)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 pendingSetup?.complete(false)
-                pendingOp?.result?.complete(STATUS_DISCONNECTED)
+                // Coupure pour une raison de sécurité (échec d'authentification, clé manquante, chiffrement faux),
+                // par exemple pendant l'abonnement : c'est l'appairage qui manque, pas la machine.
+                pendingOp?.result?.complete(if (status in SECURITY_DISCONNECT_REASONS) GATT_AUTH_FAIL else STATUS_DISCONNECTED)
                 runCatching { g.close() }
                 if (gatt == g) {
                     log("liaison coupée (statut $status)")
@@ -338,6 +343,10 @@ class BleTransport(private val context: Context) {
         /** L'appairage affiche une fenêtre d'Android : on laisse le temps de la valider. */
         private const val PAIRING_TIMEOUT_MS = 30_000L
         private const val GATT_INSUFFICIENT_AUTHORIZATION = 8
+        /** GATT_AUTH_FAIL (0x89) : non public dans BluetoothGatt. */
+        private const val GATT_AUTH_FAIL = 137
+        /** Raisons de coupure HCI : échec d'authentification (0x05), clé manquante (0x06), MIC faux (0x3D). */
+        private val SECURITY_DISCONNECT_REASONS = setOf(0x05, 0x06, 0x3D)
         private const val STATUS_DISCONNECTED = -1
     }
 }

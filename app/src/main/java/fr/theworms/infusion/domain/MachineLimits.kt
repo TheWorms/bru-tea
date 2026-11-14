@@ -1,7 +1,7 @@
 package fr.theworms.infusion.domain
 
 /**
- * Plages acceptées par la Maker One, lues dans BRU Connect 1.13.0 :
+ * Plages acceptées par la Maker One :
  * eau de 100 à 350 ml par 25 ml, température de 45 à 95 °C par 5 °C puis « Maximum »,
  * 10 préréglages, surnom de 12 caractères.
  */
@@ -69,7 +69,7 @@ object MachineLimits {
     }
 
     /**
-     * « 250 ml », ou en onces comme l'écran de la machine (BRU Connect : 50 ml = 2 oz … 350 ml = 12 oz) ;
+     * « 250 ml », ou en onces comme l'écran de la machine (50 ml = 2 oz … 350 ml = 12 oz) ;
      * les demi-pas de 25 ml prennent la moyenne de leurs voisins (275 ml = 9,5 oz).
      */
     fun waterLabel(ml: Int, metric: Boolean = true, comma: Boolean = java.util.Locale.getDefault().language != "en"): String {

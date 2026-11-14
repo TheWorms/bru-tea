@@ -50,7 +50,7 @@
     <string name="brew_bad_temperature">Cette température n’est pas gérée par le firmware de la machine.</string>
     <string name="brew_bad_time">Cette durée n’est pas gérée par le firmware de la machine.</string>
     <string name="brew_bad_water">Cette quantité d’eau n’est pas gérée : les pas de 25 ml demandent une mise à jour du firmware.</string>
-    <string name="brew_link_lost">Liaison avec la machine coupée.</string>
+    <string name="brew_cancelled">Infusion annulée : rien n’est parti vers la machine.</string>
     <string name="brew_no_answer">La machine n’a pas répondu.</string>
     <string name="brew_not_ready">La machine n’est pas prête : vérifie le couvercle, le réservoir et la tasse.</string>
     <string name="brew_not_started">Infusion non lancée</string>
@@ -64,7 +64,6 @@
     <string name="catalog_http">Le serveur a répondu %1$d.</string>
     <string name="catalog_not_found">Fichier introuvable : %1$s.</string>
     <string name="catalog_offline">Pas de connexion à la base.</string>
-    <string name="catalog_private">Base de thés privée : le dépôt doit être public.</string>
     <string name="catalog_ssl">Certificat du serveur de la base refusé.</string>
     <string name="catalog_too_big">Fichier trop gros.</string>
     <string name="catalog_too_big_kb">Fichier trop gros (%1$d Ko).</string>
@@ -105,6 +104,8 @@
     <string name="edit_on_machine_detail">%1$d / %2$d · envoyé avec « Synchroniser »</string>
     <string name="edit_origin_hint">Origine (facultatif)</string>
     <string name="edit_photo_from_base">photo de ta base</string>
+    <string name="edit_photo_from_base_credit">photo de ta base · %1$s</string>
+    <string name="edit_photo_loading">Photo en cours…</string>
     <string name="edit_photo_mine">ta photo</string>
     <string name="edit_photo_unreadable">Cette photo n’a pas pu être lue.</string>
     <string name="edit_this_tea">Modifier ce thé</string>
@@ -158,7 +159,7 @@
     <string name="machine_card_status">%1$s · %2$s</string>
     <string name="machine_change">Changer de machine</string>
     <string name="machine_clock">Heure</string>
-    <string name="machine_clock_detail">Réglée sur celle du téléphone à chaque connexion</string>
+    <string name="machine_clock_detail">Réglée sur celle du téléphone à la première connexion après le lancement de l’app, à chaque connexion que tu demandes, ou avec « Régler »</string>
     <string name="machine_clock_done">Heure de la machine réglée.</string>
     <string name="machine_clock_set">Régler</string>
     <string name="machine_connect">Se connecter</string>
@@ -183,18 +184,20 @@
     <string name="machine_preset_pending">à envoyer · %1$s</string>
     <string name="machine_preset_received">reçu · %1$s</string>
     <string name="machine_read_action">Lire les préréglages de la machine</string>
-    <string name="machine_read_hint">Demande à la machine ses préréglages, en lecture seule. L’app de BRU ne le fait jamais : si la machine répond autrement que prévu, rien n’est importé.</string>
+    <string name="machine_read_hint">Demande à la machine ses préréglages, en lecture seule. L’app de BRU ne le fait jamais : la lecture s’arrête à la première réponse inattendue, et seuls les préréglages lus avant sont importés.</string>
     <string name="machine_read_title">Reprendre ceux de la machine (essai)</string>
     <string name="machine_section_care">Entretien</string>
     <string name="machine_section_presets">Sur la machine</string>
     <string name="machine_section_settings">Réglages de la machine</string>
     <string name="machine_sending">Envoi à la machine…</string>
+    <string name="machine_busy">Un envoi à la machine est déjà en cours.</string>
     <string name="machine_settings_hint">La langue et les unités servent à l’app et à l’écran de la machine.</string>
     <string name="machine_settings_offline">Hors connexion, seule la langue de l’app change ; connecte la machine pour régler son écran.</string>
     <string name="machine_sync">Synchroniser sur la machine</string>
     <string name="machine_sync_hint">Rien n’est écrit sur la machine sans « Synchroniser ». Le logo vert dit que la machine a reçu et accepté le thé.</string>
     <string name="machine_units">Unités</string>
     <string name="machine_unreachable">Machine hors de portée.</string>
+    <string name="machine_connecting_hint">Connexion à la machine…</string>
     <string name="machine_version_unknown">Version inconnue</string>
     <string name="manual_brew_button">Infuser · %1$s</string>
     <string name="manual_brew_name">Infusion manuelle</string>
@@ -237,7 +240,6 @@
     <string name="options_title">Options de l’app</string>
     <string name="options_vibration">Vibration</string>
     <string name="options_vibration_detail">En même temps que le bip</string>
-    <string name="overlay_done">Prêt</string>
     <string name="overlay_enjoy">Bonne dégustation</string>
     <string name="overlay_header">%1$s · INFUSION</string>
     <string name="overlay_not_started">Pas démarrée</string>
@@ -272,6 +274,8 @@
     <string name="pill_connecting">Connexion…</string>
     <string name="pill_offline">Hors de portée</string>
     <string name="pill_pair">Associer une machine</string>
+    <string name="pill_bluetooth_off">Bluetooth coupé</string>
+    <string name="pill_pairing_lost">Appairage perdu</string>
     <string name="preset_bad_format">format refusé par ce firmware</string>
     <string name="preset_bad_slot">numéro de préréglage refusé</string>
     <string name="preset_bad_temperature">température refusée</string>
@@ -285,7 +289,8 @@
     <string name="problem_subscribe">Abonnement aux messages de la machine refusé.</string>
     <string name="problem_unreachable">%1$s Rapproche-toi ou allume la machine.</string>
     <string name="read_done">Lecture terminée.</string>
-    <string name="read_unknown">Réponse de la machine non reconnue pour le préréglage %1$d : rien n’a été importé.</string>
+    <string name="read_nothing">Rien n’a été importé.</string>
+    <string name="read_unknown">Réponse de la machine non reconnue pour le préréglage %1$d.</string>
     <string name="read_unsupported">La machine ne répond pas à la lecture des préréglages : cette fonction ne semble pas exister.</string>
     <string name="rename_empty">Le nom ne peut pas être vide.</string>
     <string name="rename_failed">Nom « %1$s » gardé dans l’app, mais il n’a pas pu être envoyé à la machine.</string>
@@ -360,6 +365,7 @@
     <string name="type_white">Thé blanc</string>
     <string name="unsuitable_cold">Infusion à froid : la machine ne la prépare pas.</string>
     <string name="unsuitable_matcha">Le matcha se fouette : il ne se prépare pas à la machine.</string>
+    <string name="update_after_brew">Installation après l’infusion</string>
     <string name="update_bad_hash">Empreinte différente de celle publiée : fichier écarté.</string>
     <string name="update_downloading">Téléchargement %1$d %%</string>
     <string name="update_empty">Réponse vide.</string>
@@ -371,6 +377,7 @@
     <string name="update_permission">Sans l’autorisation d’installer des applis, Infusion ne peut pas se mettre à jour.</string>
     <string name="update_pill">Mise à jour %1$s</string>
     <string name="update_retry">%1$s · réessayer</string>
+    <string name="update_row_after_brew">La %1$s s’installera à la fin de l’infusion.</string>
     <string name="update_row_available">Infusion %1$s est disponible (tu as la %2$s).</string>
     <string name="update_row_downloading">Téléchargement de la %1$s… %2$d %%</string>
     <string name="update_row_installing">Installation de la %1$s…</string>

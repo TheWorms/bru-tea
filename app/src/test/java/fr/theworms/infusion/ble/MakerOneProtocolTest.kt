@@ -10,7 +10,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Exemples calculés d'après le code de BRU Connect 1.13.0 : à confirmer sur la machine. */
+/** Exemples de trames : à confirmer sur la machine. */
 class MakerOneProtocolTest {
     private fun hex(s: String): ByteArray = s.split(' ').filter { it.isNotBlank() }.map { it.toInt(16).toByte() }.toByteArray()
     private fun zeros(n: Int) = ByteArray(n)
@@ -49,7 +49,7 @@ class MakerOneProtocolTest {
     @Test fun `surnom, réglages et heure`() {
         val name = hex("4D 00 61 00 6B 00 65 00 72 00 20 00 4F 00 6E 00 65 00") + zeros(30)
         assertArrayEquals(hex("FF 38 4A") + name + zeros(4) + hex("77"), MakerOneProtocol.nickname("Maker One"))
-        assertArrayEquals(hex("FF 08 2C 01 01 00 0A FB"), MakerOneProtocol.setup(MachineLanguage.FR, metric = true, presets = 10))
+        assertArrayEquals(hex("FF 08 2C 01 01 00 0A FB"), MakerOneProtocol.setup(MachineLanguage.FR.code, metric = true, presets = 10))
         assertArrayEquals(hex("FF 08 08 40 6C F7 6A DE"), MakerOneProtocol.setTime(1_794_600_000L))
     }
 
@@ -140,13 +140,12 @@ class MakerOneProtocolTest {
         assertArrayEquals(hex("FF 04 2A E9"), MakerOneProtocol.setupRead())
         // Exemple de la doc : fr, métrique, time 0, 10 préréglages.
         assertArrayEquals(hex("FF 08 2C 01 01 00 0A FB"), MakerOneProtocol.setup(1, true, 10))
-        assertArrayEquals(MakerOneProtocol.setup(MachineLanguage.FR, true, 10), MakerOneProtocol.setup(1, true, 10))
         // Réponse supposée de même forme (code 43) : anglais, impérial, 9 préréglages.
         val reply = MakerOneProtocol.frame(43, byteArrayOf(0, 0, 0, 9), 8)
         assertEquals(MachineSetup(0, false, 0, 9), MakerOneProtocol.parseSetupReply(reply))
-        assertEquals(MachineLanguage.EN, MakerOneProtocol.parseSetupReply(reply)?.language)
+        assertEquals(MachineLanguage.EN, MakerOneProtocol.parseSetupReply(reply)?.languageCode?.let(MachineLanguage::of))
         // Machine en allemand (2) : langue non proposée par l'app.
-        assertNull(MakerOneProtocol.parseSetupReply(MakerOneProtocol.frame(43, byteArrayOf(2, 1, 0, 9), 8))?.language)
+        assertNull(MakerOneProtocol.parseSetupReply(MakerOneProtocol.frame(43, byteArrayOf(2, 1, 0, 9), 8))?.languageCode?.let(MachineLanguage::of))
         assertEquals(MachineLanguage.FR, MachineLanguage.ofTag("fr-FR"))
         assertEquals(MachineLanguage.EN, MachineLanguage.ofTag("en"))
         assertNull(MachineLanguage.ofTag("de"))
@@ -166,7 +165,7 @@ class MakerOneProtocolTest {
         assertNull(MachineTexts.alert(MachineTexts.BREWING, MachineTexts.SUB_STEEPING))
     }
 
-    @Test fun `trames lues avec la tolérance de l'app de BRU`() {
+    @Test fun `trames lues avec tolérance, état dès 5 octets, somme seulement notée`() {
         // Un état se lit dès 5 octets, un résultat dès 4 ; la somme n'est que notée.
         val status = MakerOneProtocol.frame(MakerOneProtocol.STATUS, byteArrayOf(5, 26), 6)
         assertEquals(Incoming.Status(5, 26, true), MakerOneProtocol.parse(status))

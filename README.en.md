@@ -7,9 +7,12 @@ It is not written, supported or endorsed by BRU; “BRU” and “Maker One” b
 
 ## Download
 
+Android 13 or later, with Bluetooth LE.
+
 **[Latest version](https://github.com/TheWorms/bru-tea/releases/latest)**: install the
-`Infusion.<version>.apk` file; the app then updates itself. Android asks once to allow installing apps
-from this source.
+`Infusion.<version>.apk` file (Android asks you to allow installing apps from your browser).
+The app then offers its own updates: the first one asks you to allow Infusion to install apps, then
+for Android's confirmation; later ones install without confirmation.
 
 ## What it does
 

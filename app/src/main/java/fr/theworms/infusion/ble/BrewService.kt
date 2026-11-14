@@ -21,6 +21,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
@@ -47,6 +49,8 @@ class BrewService : Service() {
             scope.launch { machine.cancelBrew() }
             return START_NOT_STICKY
         }
+        // Une infusion commence (ou reprend) : la fin de la précédente (« Thé prêt », « Infusion arrêtée ») est retirée.
+        getSystemService(NotificationManager::class.java).cancel(DONE_ID)
         // Toujours au premier plan d'abord (Android l'exige après startForegroundService), même si
         // l'infusion a déjà échoué : la première valeur suivie ci-dessous arrête alors le service.
         val session = machine.brew.value
@@ -55,15 +59,26 @@ class BrewService : Service() {
         startForeground(ONGOING_ID, first, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
         collector?.cancel()
         collector = scope.launch {
-            combine(machine.brew, machine.state) { b, s -> b to s }.collect { (b, s) ->
+            // collectLatest : un nouvel état annule l'attente de la fin du décompte (ci-dessous).
+            combine(machine.brew, machine.state) { b, s -> b to s }.collectLatest { (b, s) ->
                 val nm = getSystemService(NotificationManager::class.java)
                 when {
                     b == null -> finish(null)
-                    // Liaison coupée en route : on reste au premier plan, le temps que le suivi reprenne.
+                    // Infusion close : le service s'arrête (notification de fin si l'app n'est pas à l'écran).
                     b.finished -> finish(b)
                     // Liaison perdue pendant l'infusion : on reste au premier plan, le temps de la retrouver.
                     b.linkDown -> nm.notify(ONGOING_ID, reconnecting(b))
-                    else -> nm.notify(ONGOING_ID, ongoing(b, if (s.connected) MachineTexts.alert(s.status, s.subStatus) else null))
+                    else -> {
+                        val alert = if (s.connected) MachineTexts.alert(s.status, s.subStatus) else null
+                        nm.notify(ONGOING_ID, ongoing(b, alert))
+                        // La machine se tait en infusant : rien d'autre ne republie la notification, dont le décompte
+                        // passerait sous zéro. À sa fin, elle passe au texte d'étape.
+                        val left = b.steepEnd - System.currentTimeMillis()
+                        if (alert == null && left > 0) {
+                            delay(left + 1_000)
+                            nm.notify(ONGOING_ID, ongoing(b, null))
+                        }
+                    }
                 }
             }
         }
@@ -76,13 +91,16 @@ class BrewService : Service() {
         if (session != null && !machine.inForeground) {
             val nm = getSystemService(NotificationManager::class.java)
             val detail = session.error?.resolve(this) ?: session.message?.resolve(this) ?: getString(R.string.notif_enjoy)
+            // Arrêt demandé (souvent depuis cette notification) : « Infusion arrêtée », sans son ni bannière.
+            val stopped = session.problem == BrewProblem.STOPPED
             val n = NotificationCompat.Builder(this, CHANNEL_DONE)
                 .setSmallIcon(R.drawable.ic_leaf)
-                .setContentTitle(getString(if (session.error == null) R.string.notif_ready_title else R.string.notif_stopped_title, session.name))
+                .setContentTitle(getString(if (session.error == null && !stopped) R.string.notif_ready_title else R.string.notif_stopped_title, session.name))
                 .setContentText(detail)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(detail))
                 .setContentIntent(openApp())
                 .setAutoCancel(true)
+                .setSilent(stopped)
                 .setCategory(if (session.error == null) NotificationCompat.CATEGORY_STATUS else NotificationCompat.CATEGORY_ERROR)
                 .build()
             nm.notify(DONE_ID, n)
@@ -111,7 +129,7 @@ class BrewService : Service() {
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .addAction(0, getString(R.string.action_stop), PendingIntent.getService(this, 1, Intent(this, BrewService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE))
         // Décompte local depuis l'acceptation (la machine se tait en infusant), recalé sur le début réel de l'infusion.
-        val steepEnd = if (b.accepted && phase < BrewPhase.SERVING && b.steepStartedAt > 0) b.steepStartedAt + b.steepSeconds * 1000L else 0L
+        val steepEnd = b.steepEnd
         when {
             alert != null -> builder.setContentText(getString(R.string.notif_alert, alert.title.resolve(this), alert.detail.resolve(this)))
             steepEnd > System.currentTimeMillis() -> {

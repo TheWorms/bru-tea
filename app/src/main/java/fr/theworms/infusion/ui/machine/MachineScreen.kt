@@ -1,6 +1,16 @@
 package fr.theworms.infusion.ui.machine
 
 import kotlinx.coroutines.async
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import fr.theworms.infusion.ble.MachineOp
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import fr.theworms.infusion.text.text
@@ -39,7 +49,6 @@ import androidx.compose.material3.TextButton
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.theworms.infusion.BuildConfig
 import fr.theworms.infusion.ble.MachineLanguage
-import fr.theworms.infusion.catalog.Catalog
 import androidx.compose.ui.text.style.TextAlign
 import fr.theworms.infusion.ble.MachineState.Connection
 import fr.theworms.infusion.ble.MachineTexts
@@ -47,7 +56,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,7 +67,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import fr.theworms.infusion.AppContainer
 import fr.theworms.infusion.R
@@ -79,6 +86,14 @@ import fr.theworms.infusion.ui.theme.NavDisplay
 import fr.theworms.infusion.ui.theme.ThemeMode
 import kotlinx.coroutines.launch
 
+/**
+ * Carte où s'affichent « Envoi à la machine… » et le résultat d'une action : celle du bouton touché, pas le haut de
+ * la page, hors de vue quand on a fait défiler jusqu'aux préréglages ou à l'heure.
+ */
+private enum class Spot { STATUS, NAME, PRESETS, CLOCK }
+
+private data class Info(val spot: Spot, val text: UiText)
+
 @Composable
 fun MachineScreen(container: AppContainer, settings: AppSettings, onPair: () -> Unit, onRequestPermissions: () -> Unit) {
     val c = Infusion.colors
@@ -87,25 +102,34 @@ fun MachineScreen(container: AppContainer, settings: AppSettings, onPair: () -> 
     val dao = container.database.teas()
     val state by machine.state.collectAsStateWithLifecycle()
     val all by remember(dao) { dao.observeAll() }.collectAsStateWithLifecycle(initialValue = emptyList())
-    val onMachine = all.filter { it.onMachine }.sortedWith(compareBy<Tea>({ it.machineSlot ?: 99 }, { it.name.lowercase() }))
-    var info by remember { mutableStateOf<UiText?>(null) }
-    var busy by remember { mutableStateOf(false) }
+    // Même ordre que la synchronisation (TeaDao.onMachine) : positions, puis les thés sans position, par nom (tri stable
+    // sur la liste déjà rangée par nom).
+    val onMachine = all.filter { it.onMachine }.sortedBy { it.machineSlot ?: Int.MAX_VALUE }
+    var info by remember { mutableStateOf<Info?>(null) }
+    /** Action courte en cours (connexion, nom, heure), et où elle a été lancée. */
+    var busySpot by remember { mutableStateOf<Spot?>(null) }
+    // Synchronisation, lecture des préréglages, langue ou unités : suivies par la machine, pas par l'écran. Après un
+    // changement d'onglet ou une rotation, les boutons restent inactifs tant que l'envoi lancé avant tourne encore.
+    val operation by machine.operation.collectAsStateWithLifecycle()
+    val presetsBusy = busySpot == Spot.PRESETS || operation == MachineOp.SYNC || operation == MachineOp.READ
+    val busy = busySpot != null || operation != null
     var picking by remember { mutableStateOf(false) }
     var confirmSync by remember { mutableStateOf(false) }
     var unknownReply by remember { mutableStateOf<String?>(null) }
     val setupInfo by machine.setupMessage.collectAsStateWithLifecycle()
     var removing by remember { mutableStateOf<Tea?>(null) }
-    var setupBusy by remember { mutableStateOf(false) }
+    var setupLocal by remember { mutableStateOf(false) }
+    val setupBusy = setupLocal || operation == MachineOp.SETUP
     // Envois à la machine dans le scope de l'app : changer d'onglet ou tourner le téléphone ne les coupe pas
     // en route (une synchronisation interrompue laissait des préréglages mélangés). Le résultat s'affiche si
     // l'écran est encore là.
     val changeSetup: (suspend () -> UiText) -> Unit = { block ->
-        setupBusy = true
-        scope.launch { container.appScope.async { block() }.await(); setupBusy = false }
+        setupLocal = true
+        scope.launch { container.appScope.async { block() }.await(); setupLocal = false }
     }
-    val run: (suspend () -> UiText?) -> Unit = { block ->
-        busy = true
-        scope.launch { info = container.appScope.async { block() }.await(); busy = false }
+    val run: (Spot, suspend () -> UiText?) -> Unit = { spot, block ->
+        busySpot = spot
+        scope.launch { info = container.appScope.async { block() }.await()?.let { Info(spot, it) }; busySpot = null }
     }
     val context = LocalContext.current
     val appLanguage = AppLanguage.current(context)
@@ -137,31 +161,35 @@ fun MachineScreen(container: AppContainer, settings: AppSettings, onPair: () -> 
                     )
                 }
             }
-            state.problem?.let { Text(it.asString(), style = MaterialTheme.typography.bodyMedium, color = c.heatInk) }
+            state.problem?.let {
+                Text(it.asString(), style = MaterialTheme.typography.bodyMedium, color = c.heatInk, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 when {
                     !machine.hasPermissions() -> SmallAction(stringResource(R.string.machine_allow_bluetooth), filled = true, onClick = onRequestPermissions)
                     state.connection == Connection.NONE -> SmallAction(stringResource(R.string.machine_pair), filled = true, onClick = onPair)
                     state.connection == Connection.OFFLINE -> {
-                        SmallAction(stringResource(R.string.machine_connect), filled = true) { run { if (machine.ensureConnected(userInitiated = true)) text(R.string.connected_ok) else null } }
+                        SmallAction(stringResource(R.string.machine_connect), filled = true, enabled = busySpot != Spot.STATUS) {
+                            run(Spot.STATUS) { if (machine.ensureConnected(userInitiated = true)) text(R.string.connected_ok) else null }
+                        }
                         SmallAction(stringResource(R.string.machine_change), filled = false, onClick = onPair)
                     }
                     else -> SmallAction(stringResource(R.string.machine_change), filled = false, onClick = onPair)
                 }
             }
+            Feedback(busySpot == Spot.STATUS, info.at(Spot.STATUS))
         }
-        if (busy) Text(stringResource(R.string.machine_sending), style = MaterialTheme.typography.bodyMedium, color = c.muted)
-        info?.let { Text(it.asString(), style = MaterialTheme.typography.bodyMedium, color = c.ink) }
 
         if (state.connection != Connection.NONE) {
             Card {
                 NameField(
                     saved = state.name,
                     enabled = true,
-                ) { n -> run { machine.rename(n) } }
+                ) { n -> run(Spot.NAME) { machine.rename(n) } }
                 if (state.firmware != null && !state.supportsNickname) {
                     Text(stringResource(R.string.machine_old_firmware_name), style = MaterialTheme.typography.bodySmall, color = c.muted)
                 }
+                Feedback(busySpot == Spot.NAME, info.at(Spot.NAME))
             }
         }
 
@@ -201,13 +229,14 @@ fun MachineScreen(container: AppContainer, settings: AppSettings, onPair: () -> 
                 style = MaterialTheme.typography.bodySmall, color = c.muted,
             )
             SmallAction(stringResource(R.string.machine_read_action), filled = false, enabled = !busy && state.connected) {
-                busy = true
+                busySpot = Spot.PRESETS
                 scope.launch {
                     val r = container.appScope.async { machine.readMachinePresets() }.await()
-                    info = r.message; unknownReply = r.unknownReply
-                    busy = false
+                    info = Info(Spot.PRESETS, r.message); unknownReply = r.unknownReply
+                    busySpot = null
                 }
             }
+            Feedback(presetsBusy, info.at(Spot.PRESETS))
             unknownReply?.let { raw ->
                 val clipboard = androidx.compose.ui.platform.LocalClipboard.current
                 Text(raw, style = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace), color = c.ink)
@@ -221,15 +250,14 @@ fun MachineScreen(container: AppContainer, settings: AppSettings, onPair: () -> 
         Card {
             // Langue : celle de l'app (gardée par Android) et de l'écran de la machine, connectée ou non.
             // Unités : lues sur la machine à la connexion, changées seulement connectée (puis relues).
-            val canChange = state.connected && !setupBusy
+            val canChange = state.connected && !setupBusy && operation == null
             Label(stringResource(R.string.machine_language))
             Segmented(MachineLanguage.entries.map { it to it.label }, appLanguage, { l ->
                 if (l != appLanguage) {
-                    setupBusy = true
+                    setupLocal = true
                     val appContext = context.applicationContext
                     // Hors de l'écran : changer la langue de l'app le recrée.
                     container.appScope.launch {
-                        container.settings.setMachineLanguage(l.name)
                         if (machine.state.value.connected) machine.changeSetup(language = l) else machine.clearSetupMessage()
                         withContext(Dispatchers.Main) { AppLanguage.set(appContext, l) }
                     }
@@ -263,8 +291,11 @@ fun MachineScreen(container: AppContainer, settings: AppSettings, onPair: () -> 
                 style = MaterialTheme.typography.bodySmall, color = if (setupInfo != null && !setupBusy) c.ink else c.muted,
             )
             SettingRow(R.drawable.ic_clock, stringResource(R.string.machine_clock), stringResource(R.string.machine_clock_detail)) {
-                SmallAction(stringResource(R.string.machine_clock_set), filled = false, enabled = state.connected) { run { text(if (machine.syncClock()) R.string.machine_clock_done else R.string.machine_unreachable) } }
+                SmallAction(stringResource(R.string.machine_clock_set), filled = false, enabled = state.connected && !busy) {
+                    run(Spot.CLOCK) { text(if (machine.syncClock()) R.string.machine_clock_done else R.string.machine_unreachable) }
+                }
             }
+            Feedback(busySpot == Spot.CLOCK, info.at(Spot.CLOCK))
         }
 
         SectionTitle(stringResource(R.string.machine_section_care))
@@ -283,7 +314,7 @@ fun MachineScreen(container: AppContainer, settings: AppSettings, onPair: () -> 
                         else pluralStringResource(R.plurals.sync_confirm, n, n)
                     )
                 },
-                confirmButton = { TextButton(onClick = { confirmSync = false; run { machine.syncPresets() } }) { Text(stringResource(R.string.action_replace), color = c.danger) } },
+                confirmButton = { TextButton(onClick = { confirmSync = false; run(Spot.PRESETS) { machine.syncPresets() } }) { Text(stringResource(R.string.action_replace), color = c.danger) } },
                 dismissButton = { TextButton(onClick = { confirmSync = false }) { Text(stringResource(R.string.action_cancel), color = c.ink) } },
                 containerColor = c.card, titleContentColor = c.ink, textContentColor = c.muted,
             )
@@ -299,7 +330,7 @@ fun MachineScreen(container: AppContainer, settings: AppSettings, onPair: () -> 
                     TextButton(onClick = {
                         removing = null
                         container.appScope.launch { dao.delete(tea); container.photos.delete(tea.photoPath) }
-                        info = text(R.string.machine_deleted, tea.name)
+                        info = Info(Spot.PRESETS, text(R.string.machine_deleted, tea.name))
                     }) { Text(stringResource(R.string.action_delete), color = c.danger) }
                 },
                 dismissButton = { TextButton(onClick = { removing = null }) { Text(stringResource(R.string.action_keep), color = c.ink) } },
@@ -336,9 +367,10 @@ fun MachineScreen(container: AppContainer, settings: AppSettings, onPair: () -> 
         SectionTitle(stringResource(R.string.options_title))
         Card {
             Label(stringResource(R.string.options_theme))
-            Segmented(ThemeMode.entries.map { it to stringResource(it.label) }, settings.theme, { scope.launch { container.settings.setTheme(it) } })
+            Segmented(ThemeMode.entries.map { it to stringResource(it.label) }, settings.theme, { container.appScope.launch { container.settings.setTheme(it) } })
             Label(stringResource(R.string.options_color, stringResource(settings.accent.label)))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Couleurs lues comme un groupe de boutons radio : chacune par son nom, la choisie « sélectionnée ».
+            Row(Modifier.selectableGroup(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Accent.entries.forEach { a ->
                     val on = a == settings.accent
                     val accentName = stringResource(a.label)
@@ -346,27 +378,30 @@ fun MachineScreen(container: AppContainer, settings: AppSettings, onPair: () -> 
                         Modifier.size(40.dp)
                             .then(if (on) Modifier.border(2.dp, c.ink, CircleShape).padding(4.dp) else Modifier)
                             .clip(CircleShape).background(a.color)
-                            .clickable(onClickLabel = accentName) { scope.launch { container.settings.setAccent(a) } },
+                            .selectable(selected = on, role = Role.RadioButton) { container.appScope.launch { container.settings.setAccent(a) } }
+                            .semantics { contentDescription = accentName },
                         contentAlignment = Alignment.Center,
                     ) {
-                        if (on) Icon(painterResource(R.drawable.ic_check), contentDescription = accentName, tint = c.onAccent, modifier = Modifier.size(18.dp))
+                        if (on) Icon(painterResource(R.drawable.ic_check), contentDescription = null, tint = c.onAccent, modifier = Modifier.size(18.dp))
                     }
                 }
             }
             Label(stringResource(R.string.options_alerts))
-            ToggleRow(stringResource(R.string.options_beep), stringResource(R.string.options_beep_detail), settings.alertSound) { on -> scope.launch { container.settings.setAlertSound(on) } }
-            ToggleRow(stringResource(R.string.options_vibration), stringResource(R.string.options_vibration_detail), settings.alertVibration) { on -> scope.launch { container.settings.setAlertVibration(on) } }
+            ToggleRow(stringResource(R.string.options_beep), stringResource(R.string.options_beep_detail), settings.alertSound) { on -> container.appScope.launch { container.settings.setAlertSound(on) } }
+            ToggleRow(stringResource(R.string.options_vibration), stringResource(R.string.options_vibration_detail), settings.alertVibration) { on -> container.appScope.launch { container.settings.setAlertVibration(on) } }
             Label(stringResource(R.string.options_display))
-            Segmented(NavDisplay.entries.map { it to stringResource(it.label) }, settings.navDisplay, { scope.launch { container.settings.setNavDisplay(it) } })
+            Segmented(NavDisplay.entries.map { it to stringResource(it.label) }, settings.navDisplay, { container.appScope.launch { container.settings.setNavDisplay(it) } })
             HorizontalDivider(color = c.line)
             Label(stringResource(R.string.options_base))
             val status by container.catalog.status.collectAsStateWithLifecycle()
+            // Langue de l'app, suivie (pas Locale.getDefault(), que l'écran ne voit pas changer).
+            val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     when {
                         status.busy -> stringResource(R.string.base_checking)
                         status.error != null -> status.error!!.asString()
-                        status.count > 0 -> stringResource(R.string.base_ok, status.count, status.version, formatCheck(status.checkedAt, stringResource(R.string.date_pattern)))
+                        status.count > 0 -> stringResource(R.string.base_ok, status.count, status.version, formatCheck(status.checkedAt, stringResource(R.string.date_pattern), locale))
                         else -> stringResource(R.string.base_never)
                     },
                     style = MaterialTheme.typography.bodySmall, color = if (status.error != null) c.heatInk else c.muted, modifier = Modifier.weight(1f),
@@ -391,14 +426,15 @@ fun MachineScreen(container: AppContainer, settings: AppSettings, onPair: () -> 
 private fun NameField(saved: String, enabled: Boolean, onRename: (String) -> Unit) {
     val c = Infusion.colors
     var text by remember(saved) { mutableStateOf(saved) }
-    Label(stringResource(R.string.machine_name_label))
+    val label = stringResource(R.string.machine_name_label)
+    Label(label)
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Box(Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(c.background).padding(horizontal = 14.dp, vertical = 12.dp)) {
             BasicTextField(
                 value = text, onValueChange = { text = it.take(MachineLimits.NAME_MAX) }, singleLine = true, enabled = enabled,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = if (enabled) c.ink else c.muted), cursorBrush = SolidColor(c.accentInk),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { onRename(text) }),
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().semantics { contentDescription = label },
             )
         }
         SmallAction(stringResource(R.string.action_rename), filled = true, enabled = enabled && text.isNotBlank() && text != saved) { onRename(text) }
@@ -434,17 +470,21 @@ private fun Label(text: String) {
     Text(text, style = MaterialTheme.typography.labelMedium, color = Infusion.colors.ink)
 }
 
+/** Toute la ligne bascule l'interrupteur, et le lecteur d'écran la lit d'un seul arrêt (« Bip, activé »). */
 @Composable
 private fun ToggleRow(title: String, detail: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     val c = Infusion.colors
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(value = checked, role = Role.Switch, onValueChange = onChange),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.titleMedium, color = c.ink)
             Text(detail, style = MaterialTheme.typography.bodySmall, color = c.muted)
         }
         Spacer(Modifier.width(12.dp))
         Switch(
-            checked = checked, onCheckedChange = onChange,
+            checked = checked, onCheckedChange = null,
             colors = SwitchDefaults.colors(checkedThumbColor = c.onAccent, checkedTrackColor = c.accent, uncheckedTrackColor = c.background, uncheckedBorderColor = c.line),
         )
     }
@@ -467,14 +507,26 @@ private fun SettingRow(icon: Int, title: String, detail: String, trailing: @Comp
 }
 
 
-private fun formatCheck(millis: Long, pattern: String): String =
-    if (millis <= 0) "—" else java.text.SimpleDateFormat(pattern, java.util.Locale.getDefault()).format(java.util.Date(millis))
+/** Date de la dernière vérification de la base, au motif de la langue (« 04/11 à 13:31 », « 4 Nov at 13:31 »). */
+internal fun formatCheck(millis: Long, pattern: String, locale: java.util.Locale): String =
+    if (millis <= 0) "—" else java.text.SimpleDateFormat(pattern, locale).format(java.util.Date(millis))
+
+/** « Envoi à la machine… » pendant l'action, puis son résultat, dit au lecteur d'écran quand il paraît. */
+@Composable
+private fun Feedback(sending: Boolean, message: UiText?) {
+    val c = Infusion.colors
+    if (sending) Text(stringResource(R.string.machine_sending), style = MaterialTheme.typography.bodyMedium, color = c.muted)
+    else message?.let {
+        Text(it.asString(), style = MaterialTheme.typography.bodyMedium, color = c.ink, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+    }
+}
+
+private fun Info?.at(spot: Spot): UiText? = this?.takeIf { it.spot == spot }?.text
 
 /** Mises à jour depuis les Releases GitHub : vérifier, télécharger, confier à l'installateur d'Android. */
 @Composable
 private fun UpdateRow(container: AppContainer) {
     val c = Infusion.colors
-    val scope = rememberCoroutineScope()
     val install = rememberUpdateInstaller(container.updater, container.appScope)
     val u by container.updater.status.collectAsStateWithLifecycle()
     Label(stringResource(R.string.updates_title))
@@ -483,6 +535,7 @@ private fun UpdateRow(container: AppContainer) {
             when {
                 u.progress != null -> stringResource(R.string.update_row_downloading, u.available.orEmpty(), u.progress!!)
                 u.verifying -> stringResource(R.string.update_row_verifying, u.available.orEmpty())
+                u.waitingBrew -> stringResource(R.string.update_row_after_brew, u.available.orEmpty())
                 u.installing -> stringResource(R.string.update_row_installing, u.available.orEmpty())
                 u.checking -> stringResource(R.string.update_row_searching)
                 u.error != null -> u.error!!.asString()
@@ -494,7 +547,7 @@ private fun UpdateRow(container: AppContainer) {
         )
         Spacer(Modifier.width(10.dp))
         if (u.available != null) {
-            SmallAction(stringResource(R.string.action_install), filled = true, enabled = u.progress == null && !u.verifying && !u.installing, onClick = install)
+            SmallAction(stringResource(R.string.action_install), filled = true, enabled = !u.busy, onClick = install)
         } else {
             SmallAction(stringResource(R.string.action_check), filled = false, enabled = !u.checking) { container.appScope.launch { container.updater.check(force = true) } }
         }

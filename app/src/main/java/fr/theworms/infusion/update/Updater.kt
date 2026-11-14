@@ -35,13 +35,18 @@ data class UpdateStatus(
     val progress: Int? = null,
     /** Contrôle du fichier téléchargé (empreinte, paquet, version). */
     val verifying: Boolean = false,
+    /** Fichier prêt, installation reportée à la fin de l'infusion en cours (elle fermerait l'app). */
+    val waitingBrew: Boolean = false,
     /** Fichier confié à Android, installation en cours. */
     val installing: Boolean = false,
     val error: UiText? = null,
     /** Échec de la dernière installation, en quelques mots pour le bouton de l'accueil (null : pas d'échec). */
     val failure: UiText? = null,
     val checkedAt: Long = 0,
-)
+) {
+    /** Téléchargement, vérification, attente de la fin du thé ou installation : le bouton ne ferait rien. */
+    val busy: Boolean get() = progress != null || verifying || waitingBrew || installing
+}
 
 /**
  * Mises à jour depuis les Releases GitHub de TheWorms/bru-tea : Infusion.<version>.apk et son .sha256 (obligatoire).
@@ -110,7 +115,7 @@ class Updater(
     /** À chaque ouverture de l'app (au plus une fois par minute), sauf pendant une installation. */
     suspend fun checkIfStale(maxAgeMs: Long = 60_000L) {
         val s = _status.value
-        if (!s.checking && s.progress == null && !s.verifying && !s.installing && System.currentTimeMillis() - s.checkedAt > maxAgeMs) check()
+        if (!s.checking && !s.busy && System.currentTimeMillis() - s.checkedAt > maxAgeMs) check()
     }
 
     /** Télécharge, vérifie puis installe ; un second appui pendant ce temps est ignoré. */
@@ -118,8 +123,10 @@ class Updater(
         if (!busy.tryLock()) return
         try {
             val file = download() ?: return
-            // Infusion lancée pendant le téléchargement : on installe seulement une fois le thé prêt.
-            waitForIdleMachine()
+            // Infusion lancée pendant le téléchargement : on installe seulement une fois le thé prêt, et l'écran le dit
+            // (sans cela, le bouton redevenait « disponible » et chaque appui était ignoré).
+            _status.update { it.copy(waitingBrew = true) }
+            try { waitForIdleMachine() } finally { _status.update { it.copy(waitingBrew = false) } }
             install(file)
         } finally {
             busy.unlock()
@@ -245,6 +252,9 @@ class Updater(
         }
     }
 
+    /** Le retour d'Android concerne-t-il l'installation en cours ? (Voir [concernsSession].) */
+    fun concerns(status: Int, statusSessionId: Int): Boolean = concernsSession(status, statusSessionId, sessionId)
+
     fun onConfirmationNeeded(confirm: Intent) { _confirmation.value = confirm }
 
     /** Prend la fenêtre de confirmation à ouvrir : une seule fois (deux fenêtres font échouer l'installation). */
@@ -264,6 +274,17 @@ class Updater(
 
     companion object {
         private const val CONFIRMATION_GRACE_MS = 60_000L
+
+        /**
+         * Seul le retour de la session en cours compte : l'abandon d'une ancienne session (fenêtre d'Android quittée
+         * sans répondre, puis nouvel appui ; sessions du lancement précédent) envoie lui aussi « annulée », qui
+         * écrasait l'installation en cours. Une réussite compte toujours ; sans numéro de session, comme avant.
+         */
+        fun concernsSession(status: Int, statusSessionId: Int, current: Int?): Boolean =
+            status == PackageInstaller.STATUS_SUCCESS || statusSessionId == NO_SESSION || statusSessionId == current
+
+        /** Numéro rendu par `getIntExtra(EXTRA_SESSION_ID, …)` quand Android n'en donne pas. */
+        const val NO_SESSION = -1
 
         /** Empreinte du fichier .sha256 (« <64 hexa>  Infusion.x.y.z.apk ») ; null si absente ou mal formée. */
         fun expectedSha256(file: String?): String? =

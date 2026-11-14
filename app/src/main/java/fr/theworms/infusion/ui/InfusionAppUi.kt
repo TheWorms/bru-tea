@@ -49,6 +49,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -107,26 +110,37 @@ fun InfusionAppUi(container: AppContainer, settings: AppSettings) {
     val currentTab = Tab.entries.firstOrNull { it.route == route }
     val tab = currentTab ?: Tab.HOME
     val machine by container.machine.state.collectAsStateWithLifecycle()
+    val bluetoothOn by container.machine.bluetoothOn.collectAsStateWithLifecycle()
     val brew by container.machine.brew.collectAsStateWithLifecycle()
     var permissionTick by remember { mutableIntStateOf(0) }
     val activity = LocalActivity.current
     var permissionAskedAt by remember { mutableLongStateOf(0L) }
-    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+    // Demande d'autorisation ouverte : une seconde (double appui) ferait répondre Android aussitôt par un résultat
+    // vide, et la réponse de la vraie demande ne serait plus reçue.
+    var permissionPending by remember { mutableStateOf(false) }
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+        permissionPending = false
         permissionTick++
         // Refus définitif : Android répond aussitôt sans rien montrer. On ouvre alors les réglages de l'app,
         // seul endroit où l'autorisation peut encore être donnée.
-        val refusedForGood = !container.machine.hasPermissions() && activity != null &&
-            BleTransport.REQUIRED_PERMISSIONS.none { p -> activity.shouldShowRequestPermissionRationale(p) } &&
-            System.currentTimeMillis() - permissionAskedAt < 600
-        if (refusedForGood) runCatching {
+        val refused = activity != null && refusedForGood(
+            result, granted = container.machine.hasPermissions(),
+            rationale = BleTransport.REQUIRED_PERMISSIONS.any { p -> activity.shouldShowRequestPermissionRationale(p) },
+            elapsedMs = System.currentTimeMillis() - permissionAskedAt,
+        )
+        if (refused) runCatching {
             activity?.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:${activity.packageName}".toUri()))
         }
         container.machine.onForeground()
     }
-    val requestPermissions: () -> Unit = {
+    val requestPermissions: () -> Unit = request@{
+        if (permissionPending) return@request
+        permissionPending = true
         permissionAskedAt = System.currentTimeMillis()
         permissionLauncher.launch(BleTransport.REQUIRED_PERMISSIONS)
     }
+    // Pourquoi « Infuser » est grisé (fiche d'un thé, mode manuel) : pas de machine, connexion, Bluetooth coupé…
+    val whyNoBrew = ConnectionTexts.whyNoBrew(machine.connection, bluetoothOn, machine.problem)
     var brewError by remember { mutableStateOf<UiText?>(null) }
     val manualBrewName = stringResource(R.string.manual_brew_name)
     // Lance une infusion ; l'écran d'infusion s'affiche par-dessus tout tant qu'elle n'est pas fermée.
@@ -161,7 +175,7 @@ fun InfusionAppUi(container: AppContainer, settings: AppSettings) {
         // Page d'un thé et édition : plein écran, sans en-tête ni barre du bas.
         if (currentTab != null || route == null) {
             Header(
-                title = stringResource(tab.title()), state = machine, modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars),
+                title = stringResource(tab.title()), state = machine, bluetoothOn = bluetoothOn, modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars),
                 onClick = {
                     nav.currentBackStackEntry.go {
                         when {
@@ -178,7 +192,7 @@ fun InfusionAppUi(container: AppContainer, settings: AppSettings) {
             NavHost(nav, startDestination = Tab.HOME.route) {
                 composable(Tab.HOME.route) { e ->
                     HomeScreen(
-                        container, lastTeaId = settings.lastTeaId,
+                        container, lastTeaId = settings.lastTeaId, bluetoothOn = bluetoothOn,
                         onManual = { goTab(Tab.BREW) }, onManageFavorites = { goTab(Tab.TEAS) }, onOpenTea = { id -> e.go { nav.navigate("the/$id") } },
                         onRepeat = { tea -> startBrew { container.machine.brew(tea) } },
                     )
@@ -186,32 +200,34 @@ fun InfusionAppUi(container: AppContainer, settings: AppSettings) {
                 composable(Tab.TEAS.route) { e -> TeasScreen(container, onEdit = { id -> e.go { nav.navigate("edition/$id") } }) }
                 composable(Tab.BREW.route) { e ->
                     ManualBrewScreen(
-                        connected = machine.connected,
+                        connected = machine.connected, whyNoBrew = whyNoBrew,
                         onBrew = { t, ml, s -> startBrew { container.machine.brew(manualBrewName, t, ml, s) } },
-                        onSaveAsTea = { t, ml, s -> e.go { nav.navigate("edition/0?t=$t&ml=$ml&s=$s") } },
+                        // « manuel » dit d'où l'on vient : des réglages égaux à ceux d'un thé neuf ne cachent plus les champs.
+                        onSaveAsTea = { t, ml, s -> e.go { nav.navigate("edition/0?t=$t&ml=$ml&s=$s&manuel=true") } },
                     )
                 }
                 composable("the/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) { e ->
                     val id = e.arguments?.getLong("id") ?: 0L
                     TeaPageScreen(
-                        container, id, connected = machine.connected,
+                        container, id, connected = machine.connected, whyNoBrew = whyNoBrew,
                         onBack = { e.go { nav.popBackStack() } }, onEdit = { e.go { nav.navigate("edition/$id") } },
                         onBrew = { tea -> startBrew { container.machine.brew(tea) } },
                     )
                 }
                 composable(
-                    "edition/{id}?t={t}&ml={ml}&s={s}",
+                    "edition/{id}?t={t}&ml={ml}&s={s}&manuel={manuel}",
                     arguments = listOf(
                         navArgument("id") { type = NavType.LongType },
                         navArgument("t") { type = NavType.IntType; defaultValue = TeaDraft().temperature },
                         navArgument("ml") { type = NavType.IntType; defaultValue = TeaDraft().waterMl },
                         navArgument("s") { type = NavType.IntType; defaultValue = TeaDraft().steepSeconds },
+                        navArgument("manuel") { type = NavType.BoolType; defaultValue = false },
                     ),
                 ) { e ->
                     val a = e.arguments
                     TeaEditScreen(
                         container, teaId = a?.getLong("id") ?: 0L,
-                        draft = TeaDraft(a?.getInt("t") ?: 85, a?.getInt("ml") ?: 250, a?.getInt("s") ?: 120),
+                        draft = if (a?.getBoolean("manuel") == true) TeaDraft(a.getInt("t"), a.getInt("ml"), a.getInt("s")) else null,
                         onDone = { e.go { nav.popBackStack() } },
                         // Supprimé depuis sa page : on revient à la liste, pas sur la page d'un thé disparu.
                         onDeleted = { e.go { if (!nav.popBackStack("thes", inclusive = false)) nav.popBackStack(Tab.HOME.route, inclusive = false) } },
@@ -249,14 +265,15 @@ fun InfusionAppUi(container: AppContainer, settings: AppSettings) {
 }
 
 @Composable
-private fun Header(title: String, state: MachineState, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun Header(title: String, state: MachineState, bluetoothOn: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val c = Infusion.colors
     Row(
         modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(title, style = MaterialTheme.typography.headlineMedium, color = c.ink, modifier = Modifier.weight(1f))
-        // Pastille de connexion : le nom de la machine quand elle répond. Un appui reconnecte ou associe.
+        // Pastille de connexion : le nom de la machine quand elle répond, sinon la cause connue (Bluetooth coupé,
+        // appairage perdu). Un appui reconnecte ou associe.
         val ok = state.connected
         val (bg, fg) = if (ok) c.accentSoft to c.accentInk else c.heatSoft to c.heatInk
         Row(
@@ -267,12 +284,7 @@ private fun Header(title: String, state: MachineState, onClick: () -> Unit, modi
             Box(Modifier.size(8.dp).clip(CircleShape).background(fg))
             Spacer(Modifier.width(7.dp))
             Text(
-                when (state.connection) {
-                    MachineState.Connection.NONE -> stringResource(R.string.pill_pair)
-                    MachineState.Connection.CONNECTING -> stringResource(R.string.pill_connecting)
-                    MachineState.Connection.OFFLINE -> stringResource(R.string.pill_offline)
-                    MachineState.Connection.CONNECTED -> state.name
-                },
+                ConnectionTexts.pillLabel(state.connection, bluetoothOn, state.problem)?.let { stringResource(it) } ?: state.name,
                 style = MaterialTheme.typography.labelMedium, color = fg, maxLines = 1,
             )
         }
@@ -285,14 +297,15 @@ private fun BottomBar(current: Tab, onSelect: (Tab) -> Unit) {
     val display = Infusion.navDisplay
     Column(Modifier.fillMaxWidth().background(c.card).windowInsetsPadding(WindowInsets.navigationBars)) {
         HorizontalDivider(color = c.line)
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        // Onglets lus comme tels, l'onglet affiché « sélectionné » (la couleur seule ne le dit pas au lecteur d'écran).
+        Row(Modifier.fillMaxWidth().selectableGroup().padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Tab.entries.forEach { t ->
                 val on = t == current
                 val label = stringResource(t.label)
                 Column(
                     Modifier.weight(1f).clip(RoundedCornerShape(14.dp))
                         .background(if (on && display == NavDisplay.TEXT) c.accentSoft else androidx.compose.ui.graphics.Color.Transparent)
-                        .clickable { onSelect(t) }
+                        .selectable(selected = on, role = Role.Tab) { onSelect(t) }
                         .semantics { contentDescription = label }
                         .padding(vertical = if (display == NavDisplay.TEXT) 12.dp else 6.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -320,3 +333,11 @@ private fun BottomBar(current: Tab, onSelect: (Tab) -> Unit) {
         }
     }
 }
+
+/**
+ * Refus définitif de l'autorisation Bluetooth : Android répond aussitôt (moins de 600 ms) sans rien montrer, et
+ * sans justification à proposer. Un résultat vide n'en est pas un : c'est une demande annulée (une seconde demande
+ * pendant la première), après laquelle on n'ouvre pas les réglages d'Android par-dessus la vraie demande.
+ */
+internal fun refusedForGood(result: Map<String, Boolean>, granted: Boolean, rationale: Boolean, elapsedMs: Long): Boolean =
+    result.isNotEmpty() && !granted && !rationale && elapsedMs < 600

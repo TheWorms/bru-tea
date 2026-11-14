@@ -187,17 +187,33 @@ object Catalog {
         if (g % 1.0 == 0.0) g.toInt().toString() else if (language == MachineLanguage.EN) g.toString() else g.toString().replace('.', ',')
 
     /**
-     * Fiche qui correspond au nom écrit, d'après son nom ou ses autres noms : « Sencha du matin » trouve
-     * « Sencha ». Le nom le plus long gagne (« Darjeeling d'été » préfère « Darjeeling » à plus court).
+     * Fiche qui correspond au nom écrit, d'après son nom ou ses autres noms, par ordre de préférence :
+     * 1. le nom exact (« Cannelle » donne la Cannelle, pas « Thé noir à la cannelle ») ;
+     * 2. un nom contenu dans le texte, le plus long gagnant : « Sencha du matin » trouve « Sencha »,
+     *    « Darjeeling d'été » préfère « Darjeeling » à plus court ;
+     * 3. pour un seul mot d'au moins 4 lettres, un nom dont un mot commence par lui, le plus court gagnant :
+     *    « Gokou » trouve « Gokou Sencha », « Earl » trouve « Earl Grey » plutôt que « French Earl Grey ». Ce rang
+     *    ne devine jamais une fiche inadaptée à la machine (infusion à froid, matcha).
+     * Un mot seul trop court (« Thé ») ou un début de nom de plusieurs mots (« Thé vert », qui donnait « Thé vert
+     * glacé ») ne trouve rien : les suggestions sont là pour choisir.
      */
     fun lookup(entries: List<CatalogEntry>, typed: String): CatalogEntry? {
         val n = normalizeForSearch(typed)
         if (n.length < 3) return null
+        // Rang 3 permis : un seul mot, assez long pour ne pas choisir au hasard.
+        val guess = n.length >= 4 && ' ' !in n
         var best: CatalogEntry? = null
-        var bestLen = 0
+        // Rang 2 : -longueur (la plus longue d'abord) ; rang 3 : longueur (la plus courte d'abord). Tout rang 2 passe avant.
+        var bestScore = Int.MAX_VALUE
         for (e in entries) {
             for (k in e.searchKeys) {
-                if ((containsWord(n, k) || containsWord(k, n)) && k.length > bestLen) { best = e; bestLen = k.length }
+                val score = when {
+                    k == n -> return e
+                    containsWord(n, k) -> -k.length
+                    guess && e.unsuitable == null && " $k".contains(" $n") -> k.length
+                    else -> continue
+                }
+                if (score < bestScore) { best = e; bestScore = score }
             }
         }
         return best
@@ -245,6 +261,14 @@ object Catalog {
 
     /** Fichiers bruts de la base de thés. */
     val RAW_BASE: String = checkNotNull(rawBase(REPO_URL))
+
+    /**
+     * Réponse d'erreur de GitHub (ni 2xx, ni 304) pour le fichier `file`. La base est un dépôt public fixe : un 401 ou
+     * un 403 vient d'un proxy, d'un portail Wi-Fi ou d'un blocage de GitHub, et n'est donc qu'un code, sans conseil
+     * que l'utilisateur ne pourrait pas suivre (un dépôt privé ou absent répond 404).
+     */
+    fun httpError(code: Int, file: String): UiText =
+        if (code == 404) text(R.string.catalog_not_found, file) else text(R.string.catalog_http, code)
 
     private fun JsonObject.str(key: String): String? = (this[key] as? JsonPrimitive)?.takeUnless { it is JsonNull }?.contentOrNull
     private fun JsonObject.num(key: String): Double? = (this[key] as? JsonPrimitive)?.takeUnless { it is JsonNull }?.let { it.doubleOrNull ?: it.contentOrNull?.toDoubleOrNull() }

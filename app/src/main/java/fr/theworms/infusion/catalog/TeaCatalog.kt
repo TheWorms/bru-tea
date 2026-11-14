@@ -139,9 +139,7 @@ class TeaCatalog(private val context: Context) {
         val request = Request.Builder().url(url).apply { if (etag != null) header("If-None-Match", etag) }.build()
         http.newCall(request).execute().use { resp ->
             if (resp.code == 304) return null to etag
-            if (resp.code == 404) throw CatalogException(text(R.string.catalog_not_found, url.substringAfterLast('/')))
-            if (resp.code == 401 || resp.code == 403) throw CatalogException(text(R.string.catalog_private))
-            if (!resp.isSuccessful) throw CatalogException(text(R.string.catalog_http, resp.code))
+            if (!resp.isSuccessful) throw CatalogException(Catalog.httpError(resp.code, url.substringAfterLast('/')))
             val body = resp.body ?: throw CatalogException(text(R.string.catalog_empty_reply))
             val length = body.contentLength()
             if (length > maxBytes) throw CatalogException(text(R.string.catalog_too_big_kb, (length / 1000).toInt()))
