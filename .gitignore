@@ -1,0 +1,19 @@
+# APK de BRU : jamais dans git (code de BRU, 60 Mo)
+/apk/
+/build/
+*.apk
+*.keystore
+*.jks
+
+# Android / Gradle
+.gradle/
+.kotlin/
+/app/build/
+local.properties
+.idea/
+# Livraisons et clé de signature : jamais dans git
+*.aab
+/app/release/
+infusion-release.properties
+*.iml
+captures/
