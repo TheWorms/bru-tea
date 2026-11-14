@@ -16,4 +16,4 @@ local.properties
 /app/release/
 infusion-release.properties
 *.iml
-captures/
+/captures/
