@@ -13,7 +13,8 @@ import fr.theworms.infusion.ui.theme.Accent
 import fr.theworms.infusion.ui.theme.NavDisplay
 import fr.theworms.infusion.ui.theme.ThemeMode
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.retryWhen
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.map
 import java.io.IOException
 
@@ -69,8 +70,17 @@ class SettingsStore(private val context: Context) {
         val alertVibration = booleanPreferencesKey("alerte_vibration")
     }
 
+    /**
+     * Réglages en flux continu. Une erreur de lecture passagère donne les valeurs par défaut le temps de
+     * relire (1 s, puis jusqu'à 10 s entre deux essais), sans terminer le flux.
+     */
     val settings: Flow<AppSettings> = context.dataStore.data
-        .catch { e -> if (e is IOException) emit(emptyPreferences()) else throw e }
+        .retryWhen { cause, attempt ->
+            if (cause !is IOException) return@retryWhen false
+            if (attempt == 0L) emit(emptyPreferences())
+            delay(minOf(1_000L * (attempt + 1), 10_000L))
+            true
+        }
         .map { it.toSettings() }
 
     private fun Preferences.toSettings() = AppSettings(

@@ -170,10 +170,10 @@ object MakerOneProtocol {
 
     fun le32(v: Long): ByteArray = byteArrayOf(v.toByte(), (v shr 8).toByte(), (v shr 16).toByte(), (v shr 24).toByte())
 
-    /** Lit une trame reçue (une notification = une trame entière). */
     /**
-     * Lit une trame. Un résultat (65, 83) doit avoir au moins 5 octets et un état (69) au moins 6, en-tête et
-     * somme compris : plus court, la somme de contrôle serait lue comme une valeur (trame alors « inconnue »).
+     * Lit une trame, avec la même tolérance que l'app de BRU (et les versions 0.1.4 à 0.1.15, essayées sur
+     * la machine) : `valid` (longueur et somme) est seulement noté, jamais exigé. Un état (69) se lit dès
+     * 5 octets, un résultat (65, 83) dès 4 ; plus court, la trame reste « inconnue ».
      */
     fun parse(frame: ByteArray): Incoming {
         if (frame.size < 4) return Incoming.Unknown(-1, frame, false)
@@ -181,30 +181,28 @@ object MakerOneProtocol {
         val code = frame[2].toInt() and 0xFF
         val b3 = frame[3].toInt() and 0xFF
         return when {
-            code == STATUS && frame.size >= 6 -> Incoming.Status(b3, frame[4].toInt() and 0xFF, valid)
-            code == RESULT_BREW && frame.size >= 5 -> Incoming.BrewResult(b3, valid)
-            code == RESULT_PRESET && frame.size >= 5 -> Incoming.PresetResult(b3, valid)
+            code == STATUS && frame.size >= 5 -> Incoming.Status(b3, frame[4].toInt() and 0xFF, valid)
+            code == RESULT_BREW -> Incoming.BrewResult(b3, valid)
+            code == RESULT_PRESET -> Incoming.PresetResult(b3, valid)
             else -> Incoming.Unknown(code, frame, valid)
         }
     }
 
     /**
-     * Découpe une notification qui contiendrait plusieurs trames, d'après leur longueur (octet 1). Ce qui ne
-     * ressemble pas à une trame (pas de FF, longueur hors limites) est rendu tel quel, en un seul morceau.
+     * Découpe une notification qui porterait plusieurs trames, seulement si toutes les longueurs (octet 1)
+     * sont plausibles : chaque morceau commence par FF, fait au moins 4 octets et tient dans la notification,
+     * et le tout est couvert exactement. Sinon la notification entière est une seule trame (cas normal).
      */
     fun split(notification: ByteArray): List<ByteArray> {
         val out = mutableListOf<ByteArray>()
         var i = 0
         while (i < notification.size) {
-            val len = notification.getOrNull(i + 1)?.toInt()?.and(0xFF) ?: 0
-            if (notification[i] != 0xFF.toByte() || len < 4 || i + len > notification.size) {
-                out += notification.copyOfRange(i, notification.size)
-                break
-            }
+            val len = notification.getOrNull(i + 1)?.toInt()?.and(0xFF) ?: return listOf(notification)
+            if (notification[i] != 0xFF.toByte() || len < 4 || i + len > notification.size) return listOf(notification)
             out += notification.copyOfRange(i, i + len)
             i += len
         }
-        return out
+        return if (out.isEmpty()) listOf(notification) else out
     }
 
     // --- Codes des réglages -------------------------------------------------------------------

@@ -6,6 +6,12 @@
 **BRU Maker One**. Elle n'est ni écrite, ni soutenue, ni approuvée par BRU ; « BRU » et « Maker One »
 appartiennent à leurs propriétaires.
 
+## Télécharger
+
+**[Dernière version](https://github.com/TheWorms/bru-tea/releases/latest)** : installe le fichier
+`Infusion.<version>.apk` ; l'app se met ensuite à jour seule. Android demande une fois d'autoriser
+l'installation d'applis depuis cette source.
+
 ## Ce qu'elle fait
 
 - Accueil : la machine (état, demandes de la machine en clignotant, « Refaire », mode manuel), les favoris.
@@ -45,7 +51,7 @@ Une construction signée (`assembleRelease`) lit sa clé dans un fichier de prop
 ## Données
 
 Tout reste sur le téléphone (base Room, réglages DataStore, photos dans les fichiers privés de l'app).
-L'app ne lit en réseau que la base de thés publique et son propre canal de mises à jour.
+L'app ne lit en réseau que la base de thés publique (tea-db) et ses mises à jour (Releases GitHub de ce dépôt).
 
 ## Licence
 

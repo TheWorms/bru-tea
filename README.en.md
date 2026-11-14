@@ -5,6 +5,12 @@
 **Infusion** is an **unofficial** Android app to control the **BRU Maker One** tea machine over Bluetooth.
 It is not written, supported or endorsed by BRU; “BRU” and “Maker One” belong to their owners.
 
+## Download
+
+**[Latest version](https://github.com/TheWorms/bru-tea/releases/latest)**: install the
+`Infusion.<version>.apk` file; the app then updates itself. Android asks once to allow installing apps
+from this source.
+
 ## What it does
 
 - Home: the machine (status, blinking machine requests, “Brew again”, manual mode) and your favourites.
@@ -44,7 +50,7 @@ A signed build (`assembleRelease`) reads its key from a properties file outside 
 ## Data
 
 Everything stays on the phone (Room database, DataStore settings, photos in the app's private files).
-The app only goes online to read the public tea database and its own update channel.
+The app only goes online to read the public tea database (tea-db) and its updates (this repository's GitHub Releases).
 
 ## Licence
 

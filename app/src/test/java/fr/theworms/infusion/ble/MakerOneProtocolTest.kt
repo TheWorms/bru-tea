@@ -63,9 +63,11 @@ class MakerOneProtocolTest {
         assertEquals(1, MakerOneProtocol.temperatureCode(45))
         assertEquals(11, MakerOneProtocol.temperatureCode(95))
         assertEquals(12, MakerOneProtocol.temperatureCode(100))
-        assertEquals(0, MakerOneProtocol.waterCode(50, true))
+        // Moins de 100 ml est ramené à 100 ml (minimum de BRU).
+        assertEquals(1, MakerOneProtocol.waterCode(50, true))
+        assertEquals(1, MakerOneProtocol.waterCode(100, true))
         assertEquals(6, MakerOneProtocol.waterCode(350, true))
-        assertEquals(128, MakerOneProtocol.waterCode(75, true))
+        assertEquals(129, MakerOneProtocol.waterCode(125, true))
         assertEquals(133, MakerOneProtocol.waterCode(325, true))
         // Sans demi-pas, 325 ml devient 350 ml et 75 ml devient 100 ml.
         assertEquals(6, MakerOneProtocol.waterCode(325, false))
@@ -164,29 +166,33 @@ class MakerOneProtocolTest {
         assertNull(MachineTexts.alert(MachineTexts.BREWING, MachineTexts.SUB_STEEPING))
     }
 
-    @Test fun `trames trop courtes ou abîmées`() {
-        // Un état doit avoir 6 octets, un résultat 5 : plus court, ce n'est pas lu comme tel.
+    @Test fun `trames lues avec la tolérance de l'app de BRU`() {
+        // Un état se lit dès 5 octets, un résultat dès 4 ; la somme n'est que notée.
         val status = MakerOneProtocol.frame(MakerOneProtocol.STATUS, byteArrayOf(5, 26), 6)
         assertEquals(Incoming.Status(5, 26, true), MakerOneProtocol.parse(status))
-        assertTrue(MakerOneProtocol.parse(hex("FF 05 45 05 00")) is Incoming.Unknown)
-        assertTrue(MakerOneProtocol.parse(hex("FF 04 41 00")) is Incoming.Unknown)
-        assertEquals(Incoming.BrewResult(0, true), MakerOneProtocol.parse(MakerOneProtocol.frame(MakerOneProtocol.RESULT_BREW, byteArrayOf(0), 5)))
-        // Somme fausse : lue, mais marquée invalide (le suivi d'infusion l'ignore).
+        assertEquals(5, (MakerOneProtocol.parse(hex("FF 05 45 05 1A")) as Incoming.Status).status)
+        assertEquals(Incoming.BrewResult(0, false), MakerOneProtocol.parse(hex("FF 04 41 00")))
+        assertTrue(MakerOneProtocol.parse(hex("FF 04 45 05")) is Incoming.Unknown)
+        assertTrue(MakerOneProtocol.parse(hex("FF 41 00")) is Incoming.Unknown)
+        // Somme fausse ou longueur annoncée différente : lue quand même, marquée invalide.
         val bad = status.copyOf().also { it[it.lastIndex] = (it.last() + 1).toByte() }
+        assertEquals(26, (MakerOneProtocol.parse(bad) as Incoming.Status).subStatus)
         assertFalse(MakerOneProtocol.parse(bad).valid)
     }
 
-    @Test fun `notification portant plusieurs trames`() {
+    @Test fun `notification découpée seulement si toutes les longueurs sont plausibles`() {
         val a = MakerOneProtocol.frame(MakerOneProtocol.STATUS, byteArrayOf(1, 4), 6)
         val b = MakerOneProtocol.frame(MakerOneProtocol.RESULT_BREW, byteArrayOf(0), 5)
         val parts = MakerOneProtocol.split(a + b)
         assertEquals(2, parts.size)
         assertArrayEquals(a, parts[0])
         assertArrayEquals(b, parts[1])
-        // Une seule trame : rendue telle quelle ; un reste illisible : rendu en un morceau.
         assertEquals(1, MakerOneProtocol.split(a).size)
+        // Reste illisible, ou longueur annoncée plus courte que la trame : la notification reste entière.
         val junk = hex("01 02 03")
         assertArrayEquals(junk, MakerOneProtocol.split(junk).single())
-        assertEquals(2, MakerOneProtocol.split(a + junk).size)
+        assertArrayEquals(a + junk, MakerOneProtocol.split(a + junk).single())
+        val shortLen = hex("FF 05 45 05 1A 00 00")
+        assertArrayEquals(shortLen, MakerOneProtocol.split(shortLen).single())
     }
 }

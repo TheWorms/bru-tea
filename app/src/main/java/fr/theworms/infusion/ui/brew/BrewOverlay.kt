@@ -188,7 +188,7 @@ fun BrewOverlay(
                     }
                 }
             }
-            val retry: () -> Unit = { scope.launch { retrying = true; onRetry(); retrying = false } }
+            val retry: () -> Unit = { scope.launch { retrying = true; try { onRetry() } finally { retrying = false } } }
             val teaId = session.teaId
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 val m = Modifier.weight(1f)
@@ -201,7 +201,7 @@ fun BrewOverlay(
                     ) { scope.launch { onStop() } }
                     error == null -> OverlayButton(stringResource(R.string.action_close), filled = true, modifier = m, onClick = onClose)
                     problem == BrewProblem.NOT_READY -> {
-                        OverlayButton(stringResource(R.string.action_cancel), filled = false, modifier = m, onClick = onClose)
+                        OverlayButton(stringResource(R.string.action_cancel), filled = false, enabled = !retrying, modifier = m, onClick = onClose)
                         OverlayButton(stringResource(R.string.action_relaunch), filled = true, enabled = ready && !retrying, modifier = m, onClick = retry)
                     }
                     problem == BrewProblem.REFUSED && teaId != null && onEdit != null -> {
@@ -209,7 +209,8 @@ fun BrewOverlay(
                         OverlayButton(stringResource(R.string.action_edit_tea), filled = true, modifier = m) { onEdit(teaId) }
                     }
                     problem == BrewProblem.OFFLINE || problem == BrewProblem.NO_ANSWER || problem == BrewProblem.MACHINE_ERROR -> {
-                        OverlayButton(stringResource(R.string.action_close), filled = false, modifier = m, onClick = onClose)
+                        // Pas de fermeture pendant le réessai : la relance partirait sans fenêtre pour la suivre.
+                        OverlayButton(stringResource(R.string.action_close), filled = false, enabled = !retrying, modifier = m, onClick = onClose)
                         OverlayButton(stringResource(R.string.action_retry), filled = true, enabled = !retrying, modifier = m, onClick = retry)
                     }
                     else -> OverlayButton(stringResource(R.string.action_close), filled = true, modifier = m, onClick = onClose)

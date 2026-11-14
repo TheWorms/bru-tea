@@ -14,17 +14,12 @@ import fr.theworms.infusion.domain.toHex
 import fr.theworms.infusion.text.UiText
 import fr.theworms.infusion.text.text
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -49,13 +44,18 @@ data class UpdateStatus(
 )
 
 /**
- * Mises à jour depuis https://theworms.fr/apk/ : Infusion.<version>.apk et son .sha256 (obligatoire).
+ * Mises à jour depuis les Releases GitHub de TheWorms/bru-tea : Infusion.<version>.apk et son .sha256 (obligatoire).
  * L'APK téléchargée est vérifiée (empreinte, nom de paquet, numéro de version) puis installée par une
  * session PackageInstaller : pas d'écran « Ouvrir » d'Android à la fin. Avec UPDATE_PACKAGES_WITHOUT_USER_ACTION,
  * Android ne redemande plus de confirmation une fois qu'Infusion s'est installée elle-même. Il refuse toute
  * autre signature.
  */
-class Updater(private val context: Context, private val http: OkHttpClient) {
+class Updater(
+    private val context: Context,
+    private val http: OkHttpClient,
+    /** Attend qu'aucune infusion ne soit en cours : l'installation tue l'app, donc son suivi. */
+    private val waitForIdleMachine: suspend () -> Unit = {},
+) {
     private val _status = MutableStateFlow(UpdateStatus())
     val status: StateFlow<UpdateStatus> = _status.asStateFlow()
 
@@ -68,23 +68,42 @@ class Updater(private val context: Context, private val http: OkHttpClient) {
     /** Un seul téléchargement à la fois (un double appui en lançait deux sur le même fichier). */
     private val busy = Mutex()
     @Volatile private var sessionId: Int? = null
+    /** Dernière release trouvée (adresses de l'APK et de son empreinte) et heure du dernier appel à GitHub. */
+    @Volatile private var release: GithubRelease? = null
+    @Volatile private var lastGithubCall = 0L
     @Volatile private var confirmationShownAt = 0L
 
-    suspend fun check() = withContext(Dispatchers.IO) {
+    /**
+     * Demande à GitHub la dernière release. Au plus un appel toutes les 15 minutes (60 par heure sans compte) ;
+     * `force` (bouton « Vérifier ») passe outre. GitHub injoignable : « Pas de connexion au canal de mise à jour ».
+     */
+    suspend fun check(force: Boolean = false) = withContext(Dispatchers.IO) {
         val current = Version.parse(BuildConfig.VERSION_NAME) ?: return@withContext
+        val now = System.currentTimeMillis()
+        if (!force && !GithubReleases.mayCall(lastGithubCall, now)) return@withContext
+        lastGithubCall = now
         _status.update { it.copy(checking = true, error = null) }
-        // Au plus 4 requêtes à la fois : 25 en parallèle peuvent déclencher une limite du serveur.
-        val gate = Semaphore(PARALLEL_CHECKS)
-        val latest = catching {
-            findLatest(current) { candidates ->
-                coroutineScope { candidates.map { v -> async { gate.withPermit { if (exists(apkUrl(v))) v else null } } }.awaitAll().filterNotNull() }
-            }
-        }
+        val latest = catching { fetchLatestRelease() }
         _status.update {
             latest.fold(
-                onSuccess = { v -> it.copy(checking = false, available = if (v > current) v.toString() else null, checkedAt = System.currentTimeMillis()) },
+                onSuccess = { r ->
+                    release = r?.takeIf { x -> x.version > current }
+                    it.copy(checking = false, available = release?.version?.toString(), checkedAt = System.currentTimeMillis())
+                },
                 onFailure = { _ -> it.copy(checking = false, error = text(R.string.update_offline)) },
             )
+        }
+    }
+
+    /** `releases/latest` : la release, null s'il n'y en a pas encore (404) ; toute autre erreur est levée. */
+    private fun fetchLatestRelease(): GithubRelease? {
+        val req = Request.Builder().url(GithubReleases.LATEST_URL).header("Accept", "application/vnd.github+json").build()
+        return http.newCall(req).execute().use { resp ->
+            when {
+                resp.code == 404 -> null
+                !resp.isSuccessful -> throw IOException("HTTP ${resp.code}")
+                else -> GithubReleases.parseLatest(resp.body?.string().orEmpty())
+            }
         }
     }
 
@@ -98,7 +117,10 @@ class Updater(private val context: Context, private val http: OkHttpClient) {
     suspend fun downloadAndInstall() {
         if (!busy.tryLock()) return
         try {
-            download()?.let { install(it) }
+            val file = download() ?: return
+            // Infusion lancée pendant le téléchargement : on installe seulement une fois le thé prêt.
+            waitForIdleMachine()
+            install(file)
         } finally {
             busy.unlock()
         }
@@ -106,14 +128,15 @@ class Updater(private val context: Context, private val http: OkHttpClient) {
 
     /** Télécharge et vérifie la version disponible ; renvoie le fichier prêt, ou null (erreur dans le statut). */
     private suspend fun download(): File? = withContext(Dispatchers.IO) {
-        val v = Version.parse(_status.value.available ?: return@withContext null) ?: return@withContext null
+        val r = release ?: return@withContext null
+        val v = r.version
         _status.update { it.copy(progress = 0, error = null, failure = null) }
         val out = File(dir, "Infusion.$v.apk")
         val result = catching {
             dir.mkdirs()
             dir.listFiles()?.forEach { it.delete() }
             val digest = MessageDigest.getInstance("SHA-256")
-            http.newCall(Request.Builder().url(apkUrl(v)).build()).execute().use { resp ->
+            http.newCall(Request.Builder().url(r.apkUrl).build()).execute().use { resp ->
                 if (!resp.isSuccessful) throw UpdateRejected(text(R.string.update_http, resp.code))
                 val body = resp.body ?: throw UpdateRejected(text(R.string.update_empty))
                 val total = body.contentLength().takeIf { it > 0 }
@@ -132,7 +155,7 @@ class Updater(private val context: Context, private val http: OkHttpClient) {
             }
             _status.update { it.copy(progress = null, verifying = true) }
             // L'empreinte publiée est obligatoire : sans elle, on ne sait pas ce qu'on installerait.
-            val expected = expectedSha256(fetchText(apkUrl(v) + ".sha256")) ?: throw UpdateRejected(text(R.string.update_no_hash))
+            val expected = expectedSha256(fetchText(r.sha256Url)) ?: throw UpdateRejected(text(R.string.update_no_hash))
             if (expected != digest.digest().toHex()) throw UpdateRejected(text(R.string.update_bad_hash))
             val info = context.packageManager.getPackageArchiveInfo(out.path, PackageManager.PackageInfoFlags.of(0))
                 ?: throw UpdateRejected(text(R.string.update_unreadable))
@@ -178,7 +201,7 @@ class Updater(private val context: Context, private val http: OkHttpClient) {
         }
         var id: Int? = null
         catching {
-            val created = installer.createSession(params).also { id = it }
+            val created = installer.createSession(params).also { id = it; sessionId = it }
             installer.openSession(created).use { session ->
                 session.openWrite("Infusion.apk", 0, file.length()).use { out ->
                     file.inputStream().use { it.copyTo(out) }
@@ -189,12 +212,12 @@ class Updater(private val context: Context, private val http: OkHttpClient) {
                 val pending = PendingIntent.getBroadcast(context, created, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE)
                 session.commit(pending.intentSender)
             }
-            sessionId = created
             confirmationShownAt = 0L
             file.delete()
         }.onFailure {
             // La session n'a pas pu être confiée à Android : on la libère (sinon elle resterait sur le téléphone).
             id?.let { s -> runCatching { installer.abandonSession(s) } }
+            sessionId = null
             onInstallFailed(text(R.string.update_start_failed))
         }
     }
@@ -211,7 +234,8 @@ class Updater(private val context: Context, private val http: OkHttpClient) {
      * fenêtre d'Android a été quittée sans répondre depuis plus d'une minute, ne bloque plus le bouton.
      */
     fun onForeground() {
-        if (!_status.value.installing) return
+        // Copie de l'APK encore en cours dans la session : rien à conclure.
+        if (!_status.value.installing || busy.isLocked) return
         val id = sessionId
         val info = id?.let { runCatching { installer.getSessionInfo(it) }.getOrNull() }
         val abandoned = confirmationShownAt > 0 && System.currentTimeMillis() - confirmationShownAt > CONFIRMATION_GRACE_MS
@@ -234,29 +258,12 @@ class Updater(private val context: Context, private val http: OkHttpClient) {
         _status.update { it.copy(installing = false, error = message, failure = short) }
     }
 
-    private fun exists(url: String): Boolean = http.newCall(Request.Builder().url(url).head().build()).execute().use { resp ->
-        presence(resp.code) ?: throw IOException("HTTP ${resp.code}")
-    }
-
     private fun fetchText(url: String): String? = runCatching {
         http.newCall(Request.Builder().url(url).build()).execute().use { if (it.isSuccessful) it.body?.string()?.take(512) else null }
     }.getOrNull()
 
     companion object {
-        const val CHANNEL = "https://theworms.fr/apk/"
-        private const val PARALLEL_CHECKS = 4
         private const val CONFIRMATION_GRACE_MS = 60_000L
-        fun apkUrl(v: Version) = "${CHANNEL}Infusion.$v.apk"
-
-        /**
-         * Réponse à HEAD sur une version : publiée (2xx), absente (404, 410), ou erreur (null : 403, 5xx…) qui
-         * fait échouer la recherche au lieu de passer pour « pas publiée ».
-         */
-        fun presence(code: Int): Boolean? = when (code) {
-            in 200..299 -> true
-            404, 410 -> false
-            else -> null
-        }
 
         /** Empreinte du fichier .sha256 (« <64 hexa>  Infusion.x.y.z.apk ») ; null si absente ou mal formée. */
         fun expectedSha256(file: String?): String? =

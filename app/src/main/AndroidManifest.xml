@@ -15,7 +15,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- Mises à jour depuis theworms.fr : Android demande l'accord une fois. -->
+    <!-- Mises à jour depuis les Releases GitHub : Android demande l'accord une fois. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Mises à jour par la session d'installation : plus de confirmation une fois Infusion son propre installateur. -->
     <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />

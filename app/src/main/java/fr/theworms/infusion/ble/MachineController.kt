@@ -116,14 +116,18 @@ object BrewRules {
         var next = b.copy(message = MachineTexts.message(sub), linkDown = false, seenBrewing = b.seenBrewing || status == MachineTexts.BREWING)
         when {
             phase == BrewPhase.STEEPING && b.phase != BrewPhase.STEEPING -> next = next.copy(phase = phase, steepStartedAt = now)
-            phase != null && phase.ordinal > b.phase.ordinal -> next = next.copy(phase = phase)
+            // L'étape « fin » ne s'affiche qu'à la clôture (ci-dessous), pas sur l'écran d'une infusion précédente.
+            phase != null && phase != BrewPhase.DONE && phase.ordinal > b.phase.ordinal -> next = next.copy(phase = phase)
             sub in 120..122 && b.phase < BrewPhase.FILLING -> next = next.copy(phase = BrewPhase.CUP)
         }
-        if (phase == BrewPhase.DONE) return next.copy(phase = BrewPhase.DONE, finished = true, message = null)
+        // Fin d'infusion (« bonne dégustation », veille, menu) : seulement pour cette infusion-ci, acceptée
+        // puis vue en cours ou acceptée depuis plus de 10 s (sinon c'est l'écran de l'infusion précédente).
+        val settled = b.accepted && (next.seenBrewing || now - b.acceptedAt > BrewSession.STANDBY_GRACE_MS)
+        if (phase == BrewPhase.DONE && settled) return next.copy(phase = BrewPhase.DONE, finished = true, message = null)
         if (status == MachineTexts.ERROR) {
             return next.copy(error = MachineTexts.message(sub) ?: text(R.string.msg_error), problem = BrewProblem.MACHINE_ERROR, finished = true)
         }
-        if (b.accepted && status in CLOSING && (next.seenBrewing || now - b.acceptedAt > BrewSession.STANDBY_GRACE_MS)) {
+        if (settled && status in CLOSING) {
             return next.copy(phase = BrewPhase.DONE, finished = true, message = null)
         }
         return next
@@ -141,12 +145,16 @@ object BrewRules {
     fun onLinkLost(b: BrewSession): BrewSession =
         if (b.finished || !b.accepted) b else b.copy(linkDown = true, message = text(R.string.notif_reconnecting))
 
-    /** Acceptation par la machine (réponse 65 = 0, ou état « infusion » relu après une absence de réponse). */
-    fun onAccepted(b: BrewSession, now: Long, brewing: Boolean = false): BrewSession = b.copy(
-        accepted = true, acceptedAt = now, steepStartedAt = now, seenBrewing = b.seenBrewing || brewing,
-        phase = if (b.phase < BrewPhase.FILLING) BrewPhase.FILLING else b.phase,
-        finished = false, error = null, problem = null, linkDown = false,
-    )
+    /**
+     * Acceptation par la machine (réponse 65 = 0, ou état « infusion » relu après une absence de réponse).
+     * Une session close par une erreur de la machine n'est pas rouverte ; sinon elle repart du remplissage.
+     */
+    fun onAccepted(b: BrewSession, now: Long, brewing: Boolean = false): BrewSession =
+        if (b.finished && b.problem == BrewProblem.MACHINE_ERROR) b
+        else b.copy(
+            accepted = true, acceptedAt = now, steepStartedAt = now, seenBrewing = b.seenBrewing || brewing,
+            phase = BrewPhase.FILLING, finished = false, error = null, problem = null, linkDown = false, message = null,
+        )
 }
 
 /**
@@ -188,6 +196,8 @@ class MachineController(
     /** Dernière trame reçue (hors infusion, une minute de silence vaut liaison perdue). */
     @Volatile private var lastFrameAt = 0L
     /** Mise à l'heure et lecture des réglages déjà faites dans ce processus. */
+    @Volatile private var setupRead = false
+    @Volatile private var setupAttempts = 0
     @Volatile private var greeted = false
     /** La machine ne reconnaît plus ce téléphone : plus de tentative automatique, il faut l'associer de nouveau. */
     @Volatile private var pairingLost = false
@@ -306,6 +316,9 @@ class MachineController(
         if (address.isBlank()) return false
         if (_state.value.connected) return true
         if (userInitiated) pairingLost = false
+        // Tentative automatique (ouverture, infusion, reconnecteur) : pas si l'appairage est perdu ou si la
+        // machine n'est plus liée à Android, sinon la fenêtre d'appairage reviendrait à chaque ouverture.
+        else if (pairingLost || !transport.isBonded(address)) return false
         return connectTo(address, pairing = false, userInitiated = userInitiated)
     }
 
@@ -349,7 +362,14 @@ class MachineController(
             val machineName = settings.settings.first().machineDisplayName
             _state.update { it.copy(address = address, connection = MachineState.Connection.CONNECTED, firmware = fw ?: it.firmware, name = machineName, problem = null) }
             startPolling()
-            if (greet) { greeted = true; scope.launch { readSetup() } }
+            if (greet) greeted = true
+            // Réglages (42) relus tant qu'ils n'ont pas abouti (3 essais au plus par processus) ou sur un geste.
+            if (greet || (!setupRead && setupAttempts < MAX_SETUP_ATTEMPTS)) {
+                setupAttempts++
+                scope.launch { if (readSetup() != null) setupRead = true }
+            }
+            // Liaison retrouvée pendant une infusion (machine muette) : la session n'est plus « liaison perdue ».
+            _brew.update { b -> if (b != null && !b.finished && b.linkDown) b.copy(linkDown = false, message = null) else b }
             // App passée en arrière-plan pendant la connexion, sans infusion : on ne garde pas la liaison.
             if (!foreground && !pairing && !sessionOpen()) {
                 poller?.cancel()
@@ -405,17 +425,32 @@ class MachineController(
         lastFrameAt = System.currentTimeMillis()
         responses.tryEmit(f)
         // Une trame abîmée ne décide de rien (une fausse erreur 13 clôturerait l'infusion).
-        if (f is Incoming.Status && f.valid) {
+        if (f is Incoming.Status) {
             _state.update { it.copy(status = f.status, subStatus = f.subStatus) }
             _brew.update { it?.let { b -> BrewRules.onStatus(b, f.status, f.subStatus, System.currentTimeMillis()) } }
         }
     }
 
-    /** Envoie les réglages et lance l'infusion. Renvoie un message d'erreur, ou null si la machine a accepté. */
-    suspend fun brew(name: String, temperature: Int, waterMl: Int, steepSeconds: Int, teaId: Long? = null): UiText? {
+    /**
+     * Envoie les réglages et lance l'infusion. Renvoie un message d'erreur, ou null si la machine a accepté.
+     * Une exception imprévue (stockage, Bluetooth) termine la session avec une erreur, au lieu de la laisser
+     * ouverte sans fin.
+     */
+    suspend fun brew(name: String, temperature: Int, waterMl: Int, steepSeconds: Int, teaId: Long? = null): UiText? = try {
+        startBrew(name, temperature, waterMl, steepSeconds, teaId)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        android.util.Log.w("Infusion", "infusion interrompue par une erreur", e)
+        val why = text(R.string.msg_error)
+        _brew.update { it?.copy(error = why, problem = BrewProblem.MACHINE_ERROR, finished = true) }
+        why
+    }
+
+    private suspend fun startBrew(name: String, temperature: Int, waterMl: Int, steepSeconds: Int, teaId: Long?): UiText? {
         // La fenêtre d'infusion s'ouvre tout de suite, y compris pour dire que rien n'est parti.
         _brew.value = BrewSession(name, temperature, waterMl, MachineLimits.roundSteep(steepSeconds), teaId = teaId)
-        if (!ensureConnected()) {
+        if (!ensureConnected(userInitiated = true)) {
             val why = _state.value.problem ?: text(R.string.machine_unreachable)
             _brew.update { it?.copy(error = why, problem = BrewProblem.OFFLINE, finished = true) }
             return why
@@ -428,7 +463,7 @@ class MachineController(
         )
         val identity = if (st.supportsExtended) BrewIdentity(MakerOneProtocol.installId8(settings.installId()), name) else null
         _brew.update { it?.copy(steepSeconds = MachineLimits.steepDurations[codes.time]) }
-        val result = sendAndAwait(MakerOneProtocol.brew(codes, identity)) { (it is Incoming.BrewResult || it is Incoming.PresetResult) && it.valid }
+        val result = sendAndAwait(MakerOneProtocol.brew(codes, identity)) { it is Incoming.BrewResult || it is Incoming.PresetResult }
         val error = when (result) {
             null -> text(R.string.brew_no_answer)
             is Incoming.BrewResult -> MachineTexts.brewResult(result.code)
@@ -459,12 +494,12 @@ class MachineController(
      */
     suspend fun retryBrew(): UiText? {
         val b = _brew.value ?: return null
-        if (!ensureConnected()) {
+        if (!ensureConnected(userInitiated = true)) {
             val why = _state.value.problem ?: text(R.string.machine_unreachable)
             _brew.update { it?.copy(error = why) }
             return why
         }
-        val st = sendAndAwait(MakerOneProtocol.statusRequest(), timeoutMs = 3_000L) { it is Incoming.Status && it.valid } as? Incoming.Status
+        val st = sendAndAwait(MakerOneProtocol.statusRequest(), timeoutMs = 3_000L) { it is Incoming.Status } as? Incoming.Status
         return when {
             st == null -> text(R.string.brew_no_answer_retry).also { why -> _brew.update { it?.copy(error = why) } }
             st.status == MachineTexts.BREWING && b.problem == BrewProblem.NO_ANSWER -> {
@@ -473,6 +508,8 @@ class MachineController(
                 null
             }
             st.status == MachineTexts.BREWING -> text(R.string.brew_machine_busy).also { why -> _brew.update { it?.copy(error = why) } }
+            // Fenêtre fermée (ou autre infusion) pendant la relecture : rien n'est renvoyé.
+            _brew.value !== b -> null
             else -> brew(b.name, b.temperature, b.waterMl, b.steepSeconds, b.teaId)
         }
     }
@@ -505,7 +542,7 @@ class MachineController(
             val slot = i + 1
             val codes = BrewCodes(MakerOneProtocol.temperatureCode(tea.temperature), MakerOneProtocol.timeCode(tea.steepSeconds), MakerOneProtocol.waterCode(tea.waterMl, st.supportsHalfWater))
             val frame = MakerOneProtocol.presetWrite(slot, codes, tea.name, if (st.supportsExtended) MakerOneProtocol.NULL_TEA_ID else null)
-            val r = sendAndAwait(frame) { it is Incoming.PresetResult && it.valid } as? Incoming.PresetResult
+            val r = sendAndAwait(frame) { it is Incoming.PresetResult } as? Incoming.PresetResult
             val problem = if (r == null) text(R.string.sync_no_answer) else MachineTexts.presetResult(r.code)
             // Mise à jour ciblée : une modification du thé faite pendant la synchronisation n'est pas écrasée.
             teas.setMachineSync(tea.id, synced = problem == null, slot = slot)
@@ -651,6 +688,8 @@ class MachineController(
         private const val POLL_MS = 3_000L
         /** Relèves d'état de suite impossibles à envoyer avant de tenir la liaison pour coupée. */
         private const val MAX_POLL_FAILURES = 3
+        /** Essais de lecture des réglages (42) sans geste, par processus. */
+        private const val MAX_SETUP_ATTEMPTS = 3
         /** Hors infusion, une machine connectée qui ne répond plus depuis une minute est tenue pour perdue. */
         private const val IDLE_SILENCE_MS = 60_000L
         private const val RESPONSE_TIMEOUT_MS = 5_000L

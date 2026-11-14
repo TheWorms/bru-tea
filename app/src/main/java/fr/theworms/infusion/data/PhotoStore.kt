@@ -39,12 +39,12 @@ class PhotoStore(private val context: Context) {
     }
 
     /**
-     * Ménage : supprime du dossier les photos qu'aucun thé n'utilise, vieilles de plus d'une heure (une saisie en
-     * cours garde les siennes).
+     * Ménage : supprime du dossier les photos qu'aucun thé n'utilise et vieilles de plus de 7 jours. Une saisie
+     * restaurée après que l'app a été tuée retrouve ainsi ses photos, même plusieurs heures plus tard.
      */
     suspend fun sweep(used: Set<String>) = withContext(Dispatchers.IO) {
-        val limit = System.currentTimeMillis() - 3_600_000L
-        dir.listFiles()?.forEach { f -> if (f.isFile && f.absolutePath !in used && f.lastModified() < limit) f.delete() }
+        val now = System.currentTimeMillis()
+        dir.listFiles()?.forEach { f -> if (f.isFile && isStale(f.absolutePath, f.lastModified(), used, now)) f.delete() }
     }
 
     /** Supprime une photo de l'app ; ne touche à rien en dehors du dossier des photos. */
@@ -56,6 +56,11 @@ class PhotoStore(private val context: Context) {
 
     companion object {
         const val MAX_SIDE = 1600
+        /** Âge au-delà duquel une photo qu'aucun thé n'utilise est supprimée. */
+        const val SWEEP_AGE_MS = 7L * 24 * 3600 * 1000
+
+        fun isStale(path: String, modifiedAt: Long, used: Set<String>, now: Long): Boolean =
+            path !in used && now - modifiedAt > SWEEP_AGE_MS
 
         /** Taille ramenée dans un carré de `max` px, proportions gardées. */
         fun fitWithin(w: Int, h: Int, max: Int): Pair<Int, Int> {

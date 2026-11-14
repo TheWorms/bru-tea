@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- https partout, autorités du système seulement (base de thés sur GitHub, mises à jour sur theworms.fr). -->
+<!-- https partout, autorités du système seulement (base de thés et mises à jour sur GitHub). -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="false">
         <trust-anchors>

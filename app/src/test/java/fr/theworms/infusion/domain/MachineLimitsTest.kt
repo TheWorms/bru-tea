@@ -20,10 +20,12 @@ class MachineLimitsTest {
         assertEquals("80 °C", MachineLimits.temperatureLabel(80))
     }
 
-    @Test fun `l'eau est arrondie au pas de 25 entre 50 et 350`() {
-        assertEquals(50, MachineLimits.roundWater(0))
-        assertEquals(50, MachineLimits.roundWater(62))
-        assertEquals(75, MachineLimits.roundWater(63))
+    @Test fun `l'eau est arrondie au pas de 25 entre 100 et 350`() {
+        // BRU n'accepte pas moins de 100 ml.
+        assertEquals(100, MachineLimits.roundWater(0))
+        assertEquals(100, MachineLimits.roundWater(75))
+        assertEquals(100, MachineLimits.roundWater(112))
+        assertEquals(125, MachineLimits.roundWater(113))
         assertEquals(250, MachineLimits.roundWater(250))
         assertEquals(350, MachineLimits.roundWater(340))
         assertEquals(350, MachineLimits.roundWater(500))
@@ -48,7 +50,7 @@ class MachineLimitsTest {
         assertEquals("113 °F", MachineLimits.temperatureLabel(45, metric = false))
         assertEquals("Max", MachineLimits.temperatureLabel(100, metric = false))
         assertEquals("250 ml", MachineLimits.waterLabel(250))
-        assertEquals("2 oz", MachineLimits.waterLabel(50, metric = false))
+        assertEquals("3 oz", MachineLimits.waterLabel(50, metric = false))
         assertEquals("9 oz", MachineLimits.waterLabel(250, metric = false))
         assertEquals("9,5 oz", MachineLimits.waterLabel(275, metric = false, comma = true))
         assertEquals("9.5 oz", MachineLimits.waterLabel(275, metric = false, comma = false))

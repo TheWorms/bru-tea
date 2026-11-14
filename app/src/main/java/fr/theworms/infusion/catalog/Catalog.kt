@@ -164,6 +164,10 @@ object Catalog {
     fun scaleDose(grams: Double, fromMl: Int, toMl: Int): Double =
         if (fromMl <= 0) grams else Math.round(grams * toMl / fromMl * 2) / 2.0
 
+    /** Fiches arrivées depuis la copie précédente ; 0 au premier chargement (rien à annoncer). */
+    fun countAdded(before: Set<String>, after: List<String>): Int =
+        if (before.isEmpty()) 0 else after.count { it !in before }
+
     /**
      * Notes d'un thé après avoir repris une fiche : vides ou automatiques (préréglage repris de la machine,
      * fiche reprise avant, dans `replaceable`) → celles de la fiche ; écrites à la main → gardées, suivies du

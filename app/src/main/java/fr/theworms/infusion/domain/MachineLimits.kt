@@ -2,7 +2,7 @@ package fr.theworms.infusion.domain
 
 /**
  * Plages acceptées par la Maker One, lues dans BRU Connect 1.13.0 :
- * eau de 50 à 350 ml par 25 ml, température de 45 à 95 °C par 5 °C puis « Maximum »,
+ * eau de 100 à 350 ml par 25 ml, température de 45 à 95 °C par 5 °C puis « Maximum »,
  * 10 préréglages, surnom de 12 caractères.
  */
 object MachineLimits {
@@ -12,7 +12,8 @@ object MachineLimits {
     const val TEMP_MAX = 100
     const val TEMP_STEP = 5
 
-    const val WATER_MIN = 50
+    /** BRU n'accepte pas moins de 100 ml (retour de Thib, 14/11) ; la machine connaît 50 ml, l'app ne le propose plus. */
+    const val WATER_MIN = 100
     const val WATER_MAX = 350
     const val WATER_STEP = 25
 
@@ -29,7 +30,7 @@ object MachineLimits {
         return ((clamped + TEMP_STEP / 2) / TEMP_STEP * TEMP_STEP).coerceIn(TEMP_MIN, TEMP_MAX_SETTABLE)
     }
 
-    /** Arrondit au pas de 25 ml le plus proche, entre 50 et 350 ml. */
+    /** Arrondit au pas de 25 ml le plus proche, entre 100 et 350 ml. */
     fun roundWater(ml: Int): Int {
         val clamped = ml.coerceIn(WATER_MIN, WATER_MAX)
         return ((clamped - WATER_MIN + WATER_STEP / 2) / WATER_STEP * WATER_STEP + WATER_MIN).coerceIn(WATER_MIN, WATER_MAX)

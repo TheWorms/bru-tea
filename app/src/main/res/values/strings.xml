@@ -421,4 +421,12 @@
     <string name="update_no_hash">Empreinte de la mise à jour introuvable sur le serveur : fichier écarté.</string>
     <string name="error_unexpected">Erreur inattendue.</string>
     <string name="catalog_storage">Impossible d’enregistrer la base sur le téléphone (espace plein ?).</string>
+    <string name="edit_save_failed">Le thé n’a pas pu être enregistré (stockage du téléphone).</string>
+    <string name="notif_catalog_channel">Base de thés</string>
+    <string name="notif_catalog_channel_desc">Nouveaux thés ajoutés à la base.</string>
+    <string name="notif_catalog_title">Base de thés mise à jour</string>
+    <plurals name="notif_catalog_added">
+        <item quantity="one">%d nouveau thé à découvrir.</item>
+        <item quantity="other">%d nouveaux thés à découvrir.</item>
+    </plurals>
 </resources>

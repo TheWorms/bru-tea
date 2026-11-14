@@ -1,5 +1,7 @@
 package fr.theworms.infusion.ui.teas
 
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.CancellationException
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
@@ -135,7 +137,8 @@ fun TeaEditScreen(
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
     var machineCount by remember { mutableIntStateOf(0) }
     /** Enregistrement en cours : un second appui ne crée pas un second thé. */
-    var saving by rememberSaveable { mutableStateOf(false) }
+    // Pas sauvegardé : après une recréation, « Enregistrer » ne doit pas rester bloqué.
+    var saving by remember { mutableStateOf(false) }
     // Photos ajoutées pendant la saisie : supprimées si on quitte sans enregistrer.
     val newPhotos = rememberSaveable { arrayListOf<String>() }
 
@@ -156,7 +159,9 @@ fun TeaEditScreen(
     }
     if (!ready) return
 
-    val leave: () -> Unit = {
+    val leave: () -> Unit = leave@{
+        // Pendant l'enregistrement, on ne part pas : les photos en cours d'enregistrement seraient supprimées.
+        if (saving) return@leave
         val unsaved = newPhotos.toList()
         newPhotos.clear()
         container.appScope.launch { unsaved.forEach { container.photos.delete(it) } }
@@ -224,6 +229,7 @@ fun TeaEditScreen(
         saving = true
         // Dans le scope de l'app : l'écriture va au bout même si l'écran est quitté ou recréé.
         container.appScope.launch {
+          try {
             val before = loaded
             val changedForMachine = before == null || before.temperature != temperature || before.waterMl != water ||
                 before.steepSeconds != steep || before.name != n || before.onMachine != onMachine
@@ -239,6 +245,14 @@ fun TeaEditScreen(
             newPhotos.filter { it != photo }.forEach { container.photos.delete(it) }
             newPhotos.clear()
             withContext(Dispatchers.Main) { onDone() }
+          } catch (e: CancellationException) {
+            throw e
+          } catch (e: Exception) {
+            android.util.Log.w("Infusion", "enregistrement du thé impossible", e)
+            withContext(Dispatchers.Main) { error = text(R.string.edit_save_failed) }
+          } finally {
+            withContext(NonCancellable + Dispatchers.Main) { saving = false }
+          }
         }
     }
 

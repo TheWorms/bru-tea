@@ -87,4 +87,27 @@ class BrewRulesTest {
         // Avant l'acceptation, la coupure ne change rien (brew() conclut).
         assertFalse(BrewRules.onLinkLost(sent).linkDown)
     }
+
+    @Test fun `écran de fin de l'infusion précédente - pas de clôture tout de suite`() {
+        // « Refaire » : la machine montre encore « bonne dégustation » juste après l'acceptation.
+        val early = BrewRules.onStatus(accepted, MachineTexts.STANDBY, MachineTexts.SUB_ENJOY, t0 + 300)
+        assertFalse(early.finished)
+        // Avant l'acceptation non plus.
+        assertFalse(BrewRules.onStatus(sent, MachineTexts.STANDBY, MachineTexts.SUB_ENJOY, t0 + 300).finished)
+        // Après un état d'infusion, la fin clôt bien.
+        val brewing = BrewRules.onStatus(accepted, MachineTexts.BREWING, MachineTexts.SUB_STEEPING, t0 + 20_000)
+        assertTrue(BrewRules.onStatus(brewing, MachineTexts.BREWING, MachineTexts.SUB_ENJOY, t0 + 200_000).finished)
+    }
+
+    @Test fun `une erreur de la machine n'est pas effacée par une acceptation tardive`() {
+        val failed = BrewRules.onStatus(sent, MachineTexts.ERROR, 127, t0 + 100)
+        assertTrue(failed.finished)
+        assertEquals(BrewProblem.MACHINE_ERROR, failed.problem)
+        val late = BrewRules.onAccepted(failed, t0 + 500)
+        assertTrue(late.finished)
+        assertEquals(BrewProblem.MACHINE_ERROR, late.problem)
+        // Une session sans réponse, elle, repart du remplissage.
+        val noAnswer = sent.copy(finished = true, problem = BrewProblem.NO_ANSWER, phase = BrewPhase.DONE)
+        assertEquals(BrewPhase.FILLING, BrewRules.onAccepted(noAnswer, t0 + 500, brewing = true).phase)
+    }
 }

@@ -420,4 +420,12 @@
     <string name="update_no_hash">The update’s checksum is missing on the server: file rejected.</string>
     <string name="error_unexpected">Unexpected error.</string>
     <string name="catalog_storage">Could not save the tea database on the phone (storage full?).</string>
+    <string name="edit_save_failed">The tea could not be saved (phone storage).</string>
+    <string name="notif_catalog_channel">Tea database</string>
+    <string name="notif_catalog_channel_desc">New teas added to the database.</string>
+    <string name="notif_catalog_title">Tea database updated</string>
+    <plurals name="notif_catalog_added">
+        <item quantity="one">%d new tea to discover.</item>
+        <item quantity="other">%d new teas to discover.</item>
+    </plurals>
 </resources>

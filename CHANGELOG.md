@@ -1,5 +1,35 @@
 # Journal des versions
 
+## 0.1.20
+- Mises à jour : depuis les Releases GitHub (TheWorms/bru-tea) ; theworms.fr n'est plus utilisé. Les versions jusqu'à
+  la 0.1.19 ne regardent que theworms.fr : installer la 0.1.20 une fois à la main.
+- Au plus un appel à GitHub toutes les 15 minutes (le bouton « Vérifier » passe outre) ; l'empreinte .sha256 de la
+  release reste obligatoire.
+- README : section « Télécharger » vers la dernière release.
+
+## 0.1.19
+- Base de thés : quand tea-db s'enrichit, une notification l'annonce à l'ouverture (« Base de thés mise à jour ·
+  12 nouveaux thés à découvrir. »). Rien au premier chargement.
+
+## 0.1.18
+- Eau : 100 ml au minimum (au lieu de 50 ml), comme l'accepte BRU. Curseurs, suggestions de la base et infusions
+  ramenés à 100 ml ; un thé déjà enregistré sous 100 ml part à 100 ml.
+
+## 0.1.17
+- Trames de la machine lues avec la même tolérance que l'app de BRU et que les versions 0.1.4 à 0.1.15 : longueur et
+  somme de contrôle seulement notées (la 0.1.16 les exigeait, sans preuve que la machine les respecte) ; une
+  notification n'est découpée que si toutes ses longueurs sont plausibles ; chaque trame reçue est journalisée.
+- Suivi d'infusion : l'écran « bonne dégustation » d'une infusion précédente ne clôt plus la nouvelle ; une erreur de la
+  machine n'est plus effacée par une acceptation tardive ; liaison retrouvée en cours d'infusion : plus de « reconnexion »
+  affiché à tort ; « Réessayer » ne renvoie rien si la fenêtre a été fermée entre-temps (« Fermer » inactif pendant le
+  réessai) ; une erreur imprévue termine la session au lieu de la laisser ouverte.
+- Liaison : une écriture restée sans réponse coupe et reprend la liaison (avant, chaque écriture suivante échouait) ; plus
+  de fenêtre d'appairage à l'ouverture quand la machine n'est plus liée ; lecture des réglages retentée (3 fois au plus).
+- Mises à jour : installation reportée à la fin d'une infusion en cours ; une installation encore en copie n'est plus
+  prise pour abandonnée.
+- Enregistrement d'un thé : erreur affichée, bouton jamais bloqué, retour impossible pendant l'enregistrement ; photos
+  inutilisées supprimées seulement après 7 jours ; réglages relus après une erreur de lecture passagère.
+
 ## 0.1.16
 Scan de stabilité et de propreté (trois relectures indépendantes et lint Android complet).
 - Infusion, machine muette pendant qu'elle infuse : décompte local depuis l'acceptation (recalé au début réel de

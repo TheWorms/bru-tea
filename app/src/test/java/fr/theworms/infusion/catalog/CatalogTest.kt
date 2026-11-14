@@ -46,7 +46,7 @@ class CatalogTest {
         assertNull(assam.unsuitable)
         val gokou = p.entries.first { it.id == "green-gokou-sencha" }
         assertEquals(80, gokou.temperature)   // 82 → 80
-        assertEquals(75, gokou.waterMl)       // 70 → 75
+        assertEquals(100, gokou.waterMl)      // 70 → 100 (minimum de BRU)
         assertEquals(70, gokou.steepSeconds)  // 75 → 70 (durées de la machine ; à égalité, la plus courte)
         assertTrue(gokou.adjusted)
         assertNull(gokou.photo)
@@ -63,8 +63,8 @@ class CatalogTest {
     @Test fun `notes de départ avec dose adaptée, théine, précaution, descriptif`() {
         val e = Catalog.parse(sample).entries
         assertEquals("3 g de thé pour 250 ml. Liqueur sombre et maltée.", Catalog.notesFor(e.first { it.id == "black-assam" }))
-        // 2 g pour 70 ml, ramenés à 75 ml : 2,1 g arrondis à 2 g.
-        assertTrue(Catalog.notesFor(e.first { it.id == "green-gokou-sencha" }).startsWith("2 g de thé pour 75 ml."))
+        // 2 g pour 70 ml, ramenés à 100 ml : 2,86 g arrondis à 3 g.
+        assertTrue(Catalog.notesFor(e.first { it.id == "green-gokou-sencha" }).startsWith("3 g de thé pour 100 ml."))
         assertEquals("2 g de thé pour 300 ml. Sans théine. Déconseillée aux femmes enceintes.", Catalog.notesFor(e.first { it.id == "herbal-verveine" }))
     }
 
@@ -164,5 +164,11 @@ class CatalogTest {
         // Note d'un thé repris de la machine, dans les deux langues : remplacée par la fiche.
         assertEquals(Catalog.notesFor(assam, MachineLanguage.EN), Catalog.mergeNotes("From machine preset 3.", assam, language = MachineLanguage.EN))
         assertEquals(Catalog.notesFor(assam), Catalog.mergeNotes("Repris du préréglage 3 de la machine.", assam))
+    }
+
+    @Test fun `nouvelles fiches annoncées, sauf au premier chargement`() {
+        assertEquals(0, Catalog.countAdded(emptySet(), listOf("a", "b")))
+        assertEquals(1, Catalog.countAdded(setOf("a", "b"), listOf("a", "b", "c")))
+        assertEquals(0, Catalog.countAdded(setOf("a", "b"), listOf("a")))
     }
 }

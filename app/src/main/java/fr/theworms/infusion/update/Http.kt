@@ -4,10 +4,7 @@ import fr.theworms.infusion.BuildConfig
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
-/**
- * Client HTTP commun. L'hébergeur des mises à jour (theworms.fr) refuse la signature par défaut
- * « okhttp/… » : l'app se présente sous son nom.
- */
+/** Client HTTP commun : l'app se présente sous son nom (GitHub exige un User-Agent). */
 object Http {
     val userAgent = "Infusion/${BuildConfig.VERSION_NAME} (Android)"
 

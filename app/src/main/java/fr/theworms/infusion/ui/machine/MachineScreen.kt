@@ -470,7 +470,7 @@ private fun SettingRow(icon: Int, title: String, detail: String, trailing: @Comp
 private fun formatCheck(millis: Long, pattern: String): String =
     if (millis <= 0) "—" else java.text.SimpleDateFormat(pattern, java.util.Locale.getDefault()).format(java.util.Date(millis))
 
-/** Mises à jour depuis theworms.fr/apk/ : vérifier, télécharger, confier à l'installateur d'Android. */
+/** Mises à jour depuis les Releases GitHub : vérifier, télécharger, confier à l'installateur d'Android. */
 @Composable
 private fun UpdateRow(container: AppContainer) {
     val c = Infusion.colors
@@ -496,7 +496,7 @@ private fun UpdateRow(container: AppContainer) {
         if (u.available != null) {
             SmallAction(stringResource(R.string.action_install), filled = true, enabled = u.progress == null && !u.verifying && !u.installing, onClick = install)
         } else {
-            SmallAction(stringResource(R.string.action_check), filled = false, enabled = !u.checking) { container.appScope.launch { container.updater.check() } }
+            SmallAction(stringResource(R.string.action_check), filled = false, enabled = !u.checking) { container.appScope.launch { container.updater.check(force = true) } }
         }
     }
 }

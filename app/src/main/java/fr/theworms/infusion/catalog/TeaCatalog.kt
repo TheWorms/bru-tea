@@ -8,7 +8,10 @@ import fr.theworms.infusion.text.UiText
 import fr.theworms.infusion.text.text
 import fr.theworms.infusion.update.Http
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
@@ -46,6 +49,10 @@ class TeaCatalog(private val context: Context) {
     @Volatile private var entries: List<CatalogEntry> = emptyList()
 
     private val _status = MutableStateFlow(CatalogStatus())
+
+    /** Nombre de fiches nouvelles depuis la copie précédente (pas au premier chargement) : notifié à l'ouverture. */
+    private val _added = MutableSharedFlow<Int>(extraBufferCapacity = 1)
+    val added: SharedFlow<Int> = _added.asSharedFlow()
     val status: StateFlow<CatalogStatus> = _status.asStateFlow()
 
     /** Relit la copie locale (au démarrage, sans réseau). */
@@ -78,7 +85,10 @@ class TeaCatalog(private val context: Context) {
             val parsed = Catalog.parse(bytes.toString(Charsets.UTF_8))
             if (parsed.entries.isEmpty()) throw CatalogException(text(R.string.catalog_empty))
             store(bytes, version, newEtag)
+            val before = entries.map { it.id }.toSet()
             entries = parsed.entries
+            val fresh = Catalog.countAdded(before, parsed.entries.map { it.id })
+            if (fresh > 0) _added.tryEmit(fresh)
             version to parsed.entries.size
         }
         _status.value = result.fold(

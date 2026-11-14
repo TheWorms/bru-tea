@@ -1,24 +1,11 @@
 package fr.theworms.infusion.update
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** Règles de la recherche et de la vérification des mises à jour. */
 class UpdaterRulesTest {
-    @Test fun `réponse à HEAD - seules 404 et 410 veulent dire absente`() {
-        assertTrue(Updater.presence(200)!!)
-        assertTrue(Updater.presence(204)!!)
-        assertFalse(Updater.presence(404)!!)
-        assertFalse(Updater.presence(410)!!)
-        // Filtrage, limite de débit, panne : une erreur, pas « pas publiée ».
-        assertNull(Updater.presence(403))
-        assertNull(Updater.presence(429))
-        assertNull(Updater.presence(503))
-    }
-
     @Test fun `empreinte publiée obligatoire et bien formée`() {
         val hex = "9b62d2ac5b331066907459f39fbb3c160d3f932cd917031033fdef3ecedb38b9"
         assertEquals(hex, Updater.expectedSha256("$hex  Infusion.0.1.14.apk\n"))

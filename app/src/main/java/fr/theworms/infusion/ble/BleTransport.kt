@@ -37,7 +37,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicInteger
 
 /** Service et caractéristiques de la Maker One. */
 object MakerOneUuids {
@@ -114,13 +113,12 @@ class BleTransport(private val context: Context) {
     private val opLock = Mutex()
 
     /**
-     * Opération en attente de son rappel. Une opération abandonnée sur délai laisse un rappel en retard :
-     * il est compté dans `late` et ignoré, pour ne pas achever l'opération suivante à sa place. Les
-     * compteurs repartent de zéro à chaque connexion (une liaison qui perd ses rappels finit reconnectée).
+     * Opération en attente de son rappel. Une écriture sans rappel dans son délai rend la liaison douteuse :
+     * elle est coupée (Link.Lost) et la reconnexion repart d'une pile propre, plutôt que de compter des
+     * rappels en retard qui finiraient par achever l'opération suivante à sa place.
      */
     private class PendingOp(val result: CompletableDeferred<Int> = CompletableDeferred())
     @Volatile private var pendingOp: PendingOp? = null
-    private val late = AtomicInteger(0)
     @Volatile private var pendingSetup: CompletableDeferred<Boolean>? = null
 
     fun hasPermissions(): Boolean = REQUIRED_PERMISSIONS.all {
@@ -167,7 +165,7 @@ class BleTransport(private val context: Context) {
         deviceName = null
         // Rien n'est gardé de la liaison précédente : MTU de base, numéros d'opération remis à zéro.
         mtu = DEFAULT_MTU
-        late.set(0); pendingOp = null
+        pendingOp = null
         val setup = CompletableDeferred<Boolean>().also { pendingSetup = it }
         gatt = runCatching { device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE) }.getOrNull()
         if (gatt == null) {
@@ -210,7 +208,7 @@ class BleTransport(private val context: Context) {
         val started = runCatching { g.writeDescriptor(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) }.getOrDefault(-1)
         if (started != BluetoothStatusCodes.SUCCESS) { abandon(op); return WriteResult.Failed }
         val status = withTimeoutOrNull(PAIRING_TIMEOUT_MS) { op.result.await() }
-        finish(op, status)
+        abandon(op)
         toResult(status).also { log("abonnement : $it") }
     }
 
@@ -224,7 +222,8 @@ class BleTransport(private val context: Context) {
         val started = runCatching { g.writeCharacteristic(ch, frame, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) }.getOrDefault(-1)
         if (started != BluetoothStatusCodes.SUCCESS) { abandon(op); return WriteResult.Failed }
         val status = withTimeoutOrNull(WRITE_TIMEOUT_MS) { op.result.await() }
-        finish(op, status)
+        abandon(op)
+        if (status == null) dropDoubtfulLink()
         toResult(status).also { if (it != WriteResult.OK) log("écriture : $it") }
     }
 
@@ -232,15 +231,17 @@ class BleTransport(private val context: Context) {
 
     private fun abandon(op: PendingOp) { if (pendingOp === op) pendingOp = null }
 
-    /** Fin d'une opération ; sans rappel dans le délai, son rappel en retard sera ignoré. */
-    private fun finish(op: PendingOp, status: Int?) {
-        abandon(op)
-        if (status == null && gatt != null) late.incrementAndGet()
+    /** Écriture restée sans rappel : la liaison est tenue pour perdue (le contrôleur la reprend). */
+    private fun dropDoubtfulLink() {
+        val g = gatt ?: return
+        log("écriture sans rappel : liaison tenue pour perdue")
+        val address = g.device.address
+        disconnect()
+        _link.value = Link.Lost(address, text(R.string.link_no_answer))
     }
 
-    /** Rappel d'une écriture : ignoré s'il appartient à une opération déjà abandonnée. */
+    /** Rappel d'une écriture ou d'un descripteur : il achève l'opération en cours, s'il y en a une. */
     private fun answer(status: Int) {
-        if (late.getAndUpdate { if (it > 0) it - 1 else 0 } > 0) return
         pendingOp?.result?.complete(status)
     }
 
