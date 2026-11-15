@@ -1,5 +1,11 @@
 # Journal des versions
 
+## 0.1.22
+- Base de thés : « Vérifier » met aussi à jour les photos venues de la base quand elles changent dans la théothèque
+  (seulement celles qui ont changé : rien n'est retéléchargé sinon). Une photo de ta galerie n'est jamais remplacée.
+- Thés enregistrés avant cette version : l'app ne sait pas si leur photo vient de la base ou de la galerie ; au premier
+  « Vérifier », une seule question (Remplacer / Garder).
+
 ## 0.1.21
 Relecture complète (Bluetooth, écrans, données, propreté).
 - Infusion : « Arrêter » ou la fermeture de la fenêtre pendant la connexion clôt la session sans rien envoyer, et une

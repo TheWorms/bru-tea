@@ -41,6 +41,11 @@ internal class TeaEditWork(private val handle: SavedStateHandle) : ViewModel() {
         private set
     var photoCredit: String by Saved(handle, KEY_CREDIT, "")
         private set
+    /** Photo de la base : son chemin dans tea-db et son ETag, enregistrés avec le thé (« Vérifier » la tient à jour). */
+    var photoSource: String? by Saved(handle, KEY_SOURCE, null)
+        private set
+    var photoEtag: String? by Saved(handle, KEY_ETAG, null)
+        private set
 
     /** Photos ajoutées pendant la saisie : supprimées si on quitte sans enregistrer. */
     private var added: ArrayList<String> by Saved(handle, KEY_ADDED, ArrayList())
@@ -64,13 +69,14 @@ internal class TeaEditWork(private val handle: SavedStateHandle) : ViewModel() {
 
     /** Photo du thé enregistré, lue dans la base à l'ouverture de la fiche. */
     fun showStoredPhoto(path: String?) {
-        photo = path; photoFromCatalog = false; photoCredit = ""
+        photo = path; photoFromCatalog = false; photoCredit = ""; photoSource = null; photoEtag = null
     }
 
     /** Photo arrivée (galerie ou base) : posée sur la fiche et comptée parmi les photos ajoutées. */
-    fun setPhoto(path: String, fromCatalog: Boolean, credit: String) {
+    fun setPhoto(path: String, fromCatalog: Boolean, credit: String, source: String? = null, etag: String? = null) {
         added = ArrayList(added + path)
         photo = path; photoFromCatalog = fromCatalog; photoCredit = credit
+        photoSource = source.takeIf { fromCatalog }; photoEtag = etag.takeIf { fromCatalog }
     }
 
     /** Photos ajoutées, retirées de la liste : à garder (enregistrées) ou à supprimer par l'appelant. */
@@ -121,6 +127,8 @@ internal class TeaEditWork(private val handle: SavedStateHandle) : ViewModel() {
         const val KEY_PHOTO = "fiche.photo"
         const val KEY_FROM_CATALOG = "fiche.photoDeLaBase"
         const val KEY_CREDIT = "fiche.creditPhoto"
+        const val KEY_SOURCE = "fiche.originePhoto"
+        const val KEY_ETAG = "fiche.etagPhoto"
         const val KEY_ADDED = "fiche.photosAjoutees"
         const val KEY_FINISH = "fiche.fin"
     }

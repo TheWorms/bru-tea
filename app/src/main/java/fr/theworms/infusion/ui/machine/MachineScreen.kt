@@ -1,5 +1,7 @@
 package fr.theworms.infusion.ui.machine
 
+import androidx.compose.runtime.saveable.rememberSaveable
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.async
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.selection.selectable
@@ -394,6 +396,8 @@ fun MachineScreen(container: AppContainer, settings: AppSettings, onPair: () -> 
             HorizontalDivider(color = c.line)
             Label(stringResource(R.string.options_base))
             val status by container.catalog.status.collectAsStateWithLifecycle()
+            val teaDao = container.database.teas()
+            var askUnknown by rememberSaveable { mutableStateOf(false) }
             // Langue de l'app, suivie (pas Locale.getDefault(), que l'écran ne voit pas changer).
             val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -407,7 +411,40 @@ fun MachineScreen(container: AppContainer, settings: AppSettings, onPair: () -> 
                     style = MaterialTheme.typography.bodySmall, color = if (status.error != null) c.heatInk else c.muted, modifier = Modifier.weight(1f),
                 )
                 Spacer(Modifier.width(10.dp))
-                SmallAction(stringResource(R.string.action_check), filled = false, enabled = !status.busy) { container.appScope.launch { container.catalog.refresh() } }
+                SmallAction(stringResource(R.string.action_check), filled = false, enabled = !status.busy) {
+                    container.appScope.launch {
+                        container.catalog.refresh()
+                        container.catalog.refreshPhotos(teaDao)
+                        askUnknown = teaDao.observeUnknownPhotos().first() > 0
+                    }
+                }
+            }
+            if (!status.busy && status.photosUpdated > 0) {
+                Text(
+                    pluralStringResource(R.plurals.base_photos_updated, status.photosUpdated, status.photosUpdated),
+                    style = MaterialTheme.typography.bodySmall, color = c.muted,
+                )
+            }
+            // Thés d'avant la 0.1.22 : on ne sait pas si leur photo vient de la base ou de la galerie. Une seule question.
+            val unknown by remember(teaDao) { teaDao.observeUnknownPhotos() }.collectAsStateWithLifecycle(initialValue = 0)
+            if (askUnknown && unknown > 0) {
+                AlertDialog(
+                    onDismissRequest = { askUnknown = false },
+                    title = { Text(stringResource(R.string.unknown_photos_title)) },
+                    text = { Text(pluralStringResource(R.plurals.unknown_photos_detail, unknown, unknown)) },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            askUnknown = false
+                            container.appScope.launch { container.catalog.refreshPhotos(teaDao, replaceUnknown = true) }
+                        }) { Text(stringResource(R.string.action_replace), color = c.ink) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { askUnknown = false; container.appScope.launch { teaDao.keepUnknownPhotos() } }) {
+                            Text(stringResource(R.string.action_keep), color = c.ink)
+                        }
+                    },
+                    containerColor = c.card, titleContentColor = c.ink, textContentColor = c.muted,
+                )
             }
             HorizontalDivider(color = c.line)
             UpdateRow(container)

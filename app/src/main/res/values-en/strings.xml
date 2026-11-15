@@ -45,6 +45,7 @@
     <string name="app_version">Infusion %1$s</string>
     <string name="base_checking">Checking…</string>
     <string name="base_never">Not checked yet.</string>
+    <string name="unknown_photos_title">Photos from the base</string>
     <string name="base_ok" tools:ignore="PluralsCandidate">Up to date · %1$d teas · version %2$s · checked %3$s</string>
     <string name="brew_bad_temperature">This temperature is not supported by the machine’s firmware.</string>
     <string name="brew_bad_time">This steeping time is not supported by the machine’s firmware.</string>
@@ -434,5 +435,13 @@
     <plurals name="notif_catalog_added">
         <item quantity="one">%d new tea to discover.</item>
         <item quantity="other">%d new teas to discover.</item>
+    </plurals>
+    <plurals name="base_photos_updated">
+        <item quantity="one">%1$d photo updated from the base.</item>
+        <item quantity="other">%1$d photos updated from the base.</item>
+    </plurals>
+    <plurals name="unknown_photos_detail">
+        <item quantity="one">%1$d tea from the base has a photo from before this version: the app cannot tell whether it comes from the base or from your gallery. Replace it with the base photo? Your gallery is not touched.</item>
+        <item quantity="other">%1$d teas from the base have a photo from before this version: the app cannot tell whether they come from the base or from your gallery. Replace them with the base photos? Your gallery is not touched.</item>
     </plurals>
 </resources>

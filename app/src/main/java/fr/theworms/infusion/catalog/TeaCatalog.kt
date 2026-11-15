@@ -2,6 +2,8 @@ package fr.theworms.infusion.catalog
 
 import android.content.Context
 import fr.theworms.infusion.R
+import fr.theworms.infusion.data.PHOTO_SOURCE_UNKNOWN
+import fr.theworms.infusion.data.TeaDao
 import fr.theworms.infusion.domain.catching
 import fr.theworms.infusion.domain.toHex
 import fr.theworms.infusion.text.UiText
@@ -31,15 +33,19 @@ data class CatalogStatus(
     val count: Int = 0,
     val checkedAt: Long = 0,
     val error: UiText? = null,
+    /** Photos remplacées par leur nouvelle version au dernier « Vérifier ». */
+    val photosUpdated: Int = 0,
 )
+
+/** Photo d'une fiche téléchargée dans les fichiers de l'app : son chemin, son chemin dans tea-db et son ETag. */
+data class CatalogPhoto(val path: String, val source: String, val etag: String?)
 
 /**
  * Base de thés tea-db : docs/thes.json (environ 230 Ko) est gardé sur le téléphone et revérifié à
  * chaque ouverture de l'app (requête conditionnelle : rien n'est retéléchargé s'il n'a pas changé) ;
  * une photo n'est téléchargée que quand on récupère son thé.
  */
-class TeaCatalog(private val context: Context) {
-    private val http = Http.client
+class TeaCatalog(private val context: Context, private val http: okhttp3.OkHttpClient = Http.client) {
     private val dir = File(context.filesDir, "catalogue")
     private val teasFile = File(dir, "thes.json")
     private val versionFile = File(dir, "version.txt")
@@ -122,16 +128,70 @@ class TeaCatalog(private val context: Context) {
     fun entry(id: String): CatalogEntry? = entries.firstOrNull { it.id == id }
 
     /** Télécharge la photo d'une fiche (1200 px) dans les fichiers de l'app ; null si elle manque ou dépasse 2 Mo. */
-    suspend fun downloadPhoto(entry: CatalogEntry): String? = withContext(Dispatchers.IO) {
+    suspend fun downloadPhoto(entry: CatalogEntry): CatalogPhoto? = withContext(Dispatchers.IO) {
         val rel = entry.photo ?: return@withContext null
+        catching {
+            val (bytes, etag) = download(photoUrl(rel), MAX_PHOTO_BYTES)
+            if (bytes == null) null else CatalogPhoto(writePhoto(rel, bytes), rel, etag)
+        }.getOrNull()
+    }
+
+    /**
+     * « Vérifier », pour les photos : chaque thé dont la photo vient de la base reprend la photo de sa fiche si elle a
+     * changé dans tea-db (nouveau chemin, ou même chemin et nouvel ETag : requête conditionnelle, rien de retéléchargé
+     * sinon). Une photo de la galerie n'est jamais touchée. Les photos d'origine inconnue (thés d'avant la 0.1.22) ne
+     * sont remplacées qu'avec [replaceUnknown] (réponse « Remplacer ») ; une image identique à celle de la base garde
+     * son fichier. L'ancien fichier reste au ménage des photos (une fiche ouverte peut encore l'afficher).
+     * Renvoie le nombre de photos remplacées ; une photo illisible est laissée telle quelle.
+     */
+    suspend fun refreshPhotos(dao: TeaDao, replaceUnknown: Boolean = false): Int = withContext(Dispatchers.IO) { lock.withLock {
+        _status.value = _status.value.copy(busy = true)
+        var replaced = 0
+        try {
+            for (tea in dao.withCatalogPhoto()) {
+                val old = tea.photoPath ?: continue
+                val source = tea.photoSource ?: continue
+                if (source == PHOTO_SOURCE_UNKNOWN && !replaceUnknown) continue
+                val rel = tea.catalogId?.let { id -> entries.firstOrNull { it.id == id } }?.photo
+                if (rel == null) {
+                    // « Remplacer » sans photo dans la base : rien à mettre à la place, la question ne revient pas.
+                    if (source == PHOTO_SOURCE_UNKNOWN) dao.keepUnknownPhoto(tea.id)
+                    continue
+                }
+                // Même photo qu'au dernier téléchargement : l'ETag suffit (304, rien de retéléchargé).
+                val etag = if (source == rel) tea.photoEtag else null
+                catching {
+                    val (bytes, newEtag) = download(photoUrl(rel), MAX_PHOTO_BYTES, etag)
+                    if (bytes != null) {
+                        val current = File(old)
+                        if (current.isFile && current.readBytes().contentEquals(bytes)) {
+                            dao.setCatalogPhoto(tea.id, old, old, rel, newEtag)
+                        } else {
+                            val path = writePhoto(rel, bytes)
+                            if (dao.setCatalogPhoto(tea.id, old, path, rel, newEtag) == 1) replaced++ else File(path).delete()
+                        }
+                    }
+                }.onFailure { android.util.Log.w("Infusion", "photo de « ${tea.name} » pas mise à jour", it) }
+            }
+        } finally {
+            _status.value = _status.value.copy(busy = false, photosUpdated = replaced)
+        }
+        replaced
+    } }
+
+    private fun photoUrl(rel: String) = Catalog.RAW_BASE + Catalog.ASSETS_ROOT + rel
+
+    /** Photo écrite sous un nom neuf ; fichier partiel supprimé si l'écriture échoue. */
+    private fun writePhoto(rel: String, bytes: ByteArray): String {
         val ext = rel.substringAfterLast('.', "webp").lowercase().take(5)
         val out = File(context.filesDir, "photos/${UUID.randomUUID()}.$ext")
-        catching {
-            val bytes = download(Catalog.RAW_BASE + Catalog.ASSETS_ROOT + rel, 2_000_000).first ?: return@catching null
+        try {
             out.parentFile?.mkdirs()
             out.writeBytes(bytes)
-            out.absolutePath
-        }.onFailure { out.delete() }.getOrNull()
+        } catch (e: IOException) {
+            out.delete(); throw e
+        }
+        return out.absolutePath
     }
 
     /** Contenu et ETag ; contenu null si le serveur répond 304 à `etag`. */
@@ -159,6 +219,10 @@ class TeaCatalog(private val context: Context) {
     }
 
     private class CatalogException(val uiText: UiText) : IOException()
+
+    private companion object {
+        const val MAX_PHOTO_BYTES = 2_000_000
+    }
 
     /** Écriture de la copie locale impossible (téléphone plein…) : ce n'est pas un problème de réseau. */
     private class StorageException(cause: IOException) : Exception(cause)

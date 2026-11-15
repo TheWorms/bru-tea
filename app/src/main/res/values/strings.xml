@@ -46,6 +46,7 @@
     <string name="app_version">Infusion %1$s</string>
     <string name="base_checking">Vérification…</string>
     <string name="base_never">Pas encore vérifiée.</string>
+    <string name="unknown_photos_title">Photos de la base</string>
     <string name="base_ok" tools:ignore="PluralsCandidate">À jour · %1$d thés · version %2$s · vérifiée le %3$s</string>
     <string name="brew_bad_temperature">Cette température n’est pas gérée par le firmware de la machine.</string>
     <string name="brew_bad_time">Cette durée n’est pas gérée par le firmware de la machine.</string>
@@ -435,5 +436,15 @@
     <plurals name="notif_catalog_added">
         <item quantity="one">%d nouveau thé à découvrir.</item>
         <item quantity="other">%d nouveaux thés à découvrir.</item>
+    </plurals>
+    <plurals name="base_photos_updated">
+        <item quantity="one">%1$d photo mise à jour depuis la base.</item>
+        <item quantity="many">%1$d photos mises à jour depuis la base.</item>
+        <item quantity="other">%1$d photos mises à jour depuis la base.</item>
+    </plurals>
+    <plurals name="unknown_photos_detail">
+        <item quantity="one">%1$d thé de la base a une photo d’avant cette version : l’app ne sait pas si elle vient de la base ou de ta galerie. La remplacer par la photo de la base ? Ta galerie n’est pas touchée.</item>
+        <item quantity="many">%1$d thés de la base ont une photo d’avant cette version : l’app ne sait pas si elles viennent de la base ou de ta galerie. Les remplacer par les photos de la base ? Ta galerie n’est pas touchée.</item>
+        <item quantity="other">%1$d thés de la base ont une photo d’avant cette version : l’app ne sait pas si elles viennent de la base ou de ta galerie. Les remplacer par les photos de la base ? Ta galerie n’est pas touchée.</item>
     </plurals>
 </resources>

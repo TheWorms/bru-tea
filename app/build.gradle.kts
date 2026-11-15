@@ -29,8 +29,8 @@ android {
         minSdk = 33
         targetSdk = 35
         // Bump CONJOINT : versionName ET versionCode.
-        versionCode = 22
-        versionName = "0.1.21"
+        versionCode = 23
+        versionName = "0.1.22"
     }
 
     signingConfigs {

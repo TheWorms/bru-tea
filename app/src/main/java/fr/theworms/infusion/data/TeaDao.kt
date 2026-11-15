@@ -52,6 +52,29 @@ interface TeaDao {
     )
     suspend fun setMachineSync(id: Long, synced: Boolean, slot: Int, name: String, temperature: Int, waterMl: Int, steepSeconds: Int)
 
+    /** Thés dont la photo vient (ou peut venir) de la base de thés : ceux que « Vérifier » regarde. */
+    @Query("SELECT * FROM teas WHERE catalog_id IS NOT NULL AND photo_path IS NOT NULL AND photo_source IS NOT NULL")
+    suspend fun withCatalogPhoto(): List<Tea>
+
+    /**
+     * Photo de la base remplacée par sa nouvelle version, ou seulement son origine notée (même image) : rien si le thé
+     * n'a plus cette photo (changée entre-temps dans sa fiche). Renvoie le nombre de thés modifiés (0 ou 1).
+     */
+    @Query("UPDATE teas SET photo_path = :path, photo_source = :source, photo_etag = :etag WHERE id = :id AND photo_path = :oldPath")
+    suspend fun setCatalogPhoto(id: Long, oldPath: String, path: String, source: String, etag: String?): Int
+
+    /** Photo d'origine inconnue dont la fiche de la base n'a pas (ou plus) de photo : gardée comme une photo de la galerie. */
+    @Query("UPDATE teas SET photo_source = NULL, photo_etag = NULL WHERE id = :id AND photo_source = '$PHOTO_SOURCE_UNKNOWN'")
+    suspend fun keepUnknownPhoto(id: Long)
+
+    /** Thés d'avant la 0.1.22 dont on ne sait pas d'où vient la photo. */
+    @Query("SELECT COUNT(*) FROM teas WHERE photo_source = '$PHOTO_SOURCE_UNKNOWN'")
+    fun observeUnknownPhotos(): Flow<Int>
+
+    /** « Garder » : ces photos sont traitées comme des photos de la galerie, jamais remplacées. */
+    @Query("UPDATE teas SET photo_source = NULL, photo_etag = NULL WHERE photo_source = '$PHOTO_SOURCE_UNKNOWN'")
+    suspend fun keepUnknownPhotos()
+
     /** Chemins des photos utilisées, pour le ménage du dossier des photos. */
     @Query("SELECT photo_path FROM teas WHERE photo_path IS NOT NULL")
     suspend fun photoPaths(): List<String>

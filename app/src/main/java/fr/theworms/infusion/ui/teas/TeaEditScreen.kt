@@ -225,10 +225,10 @@ fun TeaEditScreen(
         fieldsShown = true
         lookup = Lookup.Found(found.name, found.origin, found.adjusted, found.unsuitable)
         if (found.photo != null) work.loadPhoto {
-            val path = container.catalog.downloadPhoto(found) ?: return@loadPhoto
+            val got = container.catalog.downloadPhoto(found) ?: return@loadPhoto
             // Une photo choisie dans la galerie n'est pas remplacée par celle de la base : le fichier téléchargé part.
-            if (work.photo != null && !work.photoFromCatalog) container.photos.delete(path)
-            else work.setPhoto(path, fromCatalog = true, credit = found.photoCredit)
+            if (work.photo != null && !work.photoFromCatalog) container.photos.delete(got.path)
+            else work.setPhoto(got.path, fromCatalog = true, credit = found.photoCredit, source = got.source, etag = got.etag)
         }
     }
     var nameFocused by remember { mutableStateOf(false) }
@@ -273,16 +273,26 @@ fun TeaEditScreen(
             // Photo encore en chemin : attendue un moment (l'écran reste ouvert pendant l'enregistrement). Son chargement
             // tient à une rotation (TeaEditWork) : la photo arrive dans la fiche enregistrée.
             work.awaitPhotos(PHOTO_WAIT_MS)
-            val photo = work.photo
             val before = work.loaded
-            // Relue maintenant : une synchronisation finie pendant la saisie a pu donner position et « synchronisé ».
+            // Relue maintenant : une synchronisation finie pendant la saisie a pu donner position et « synchronisé », et
+            // « Vérifier » une nouvelle photo de la base (gardée si la photo n'a pas été changée dans la fiche).
             val current = before?.let { dao.get(it.id) } ?: before
+            val keptPhoto = work.photo == before?.photoPath
+            val photo = if (keptPhoto && current != null) current.photoPath else work.photo
+            // Origine de la photo : celle du thé si elle n'a pas changé, celle de la base pour une photo de la base,
+            // aucune pour une photo de la galerie (jamais remplacée).
+            val (photoSource, photoEtag) = when {
+                photo == null -> null to null
+                keptPhoto -> current?.photoSource to current?.photoEtag
+                work.photoFromCatalog -> work.photoSource to work.photoEtag
+                else -> null to null
+            }
             val changedForMachine = before == null || before.temperature != temperature || before.waterMl != water ||
                 before.steepSeconds != steep || before.name != n || before.onMachine != onMachine
             val (synced, slot) = machineSyncAfterEdit(current, onMachine, changedForMachine)
             val tea = (current ?: Tea(name = n, temperature = temperature, waterMl = water, steepSeconds = steep)).copy(
                 name = n, type = type, origin = origin.trim(), temperature = temperature, waterMl = water, steepSeconds = steep,
-                favorite = favorite, onMachine = onMachine, notes = notes.trim(), photoPath = photo, catalogId = catalogId,
+                favorite = favorite, onMachine = onMachine, notes = notes.trim(), photoPath = photo, photoSource = photoSource, photoEtag = photoEtag, catalogId = catalogId,
                 synced = synced, machineSlot = slot,
             )
             val stored = if (before == null) tea.copy(id = dao.insert(tea)) else tea.also { dao.update(it) }
